@@ -95,6 +95,8 @@ const unsigned long FIL_ANTI_REBOND_MS = 30UL;
 
 // ---------------- Etats ----------------
 enum ErreurChauffe : uint8_t { ERR_AUCUNE, ERR_SONDE, ERR_TEMP_MAX, ERR_RUNAWAY };
+enum Direction : uint8_t { DIR_NONE, X_PLUS, X_MOINS, Y_PLUS, Y_MOINS };
+enum EvenementBouton : uint8_t { BTN_AUCUN, BTN_COURT, BTN_LONG };
 uint8_t erreurChauffe = ERR_AUCUNE;
 
 bool chauffeOn = false;
@@ -433,7 +435,6 @@ void lireFil() {
 }
 
 // ---------------- Joystick : directions et repetiteur ----------------
-enum Direction : uint8_t { DIR_NONE, X_PLUS, X_MOINS, Y_PLUS, Y_MOINS };
 
 uint8_t lireDirectionBrute() {
   int x = analogRead(PIN_JOY_X) - 512;
@@ -470,7 +471,6 @@ uint8_t lireDirectionEvenement() {
 }
 
 // Evenements bouton : appui court au relachement, appui long des 1,5 s.
-enum EvenementBouton : uint8_t { BTN_AUCUN, BTN_COURT, BTN_LONG };
 uint8_t lireEvenementBouton() {
   static bool lecturePrecedente = HIGH;
   static bool etatStable = HIGH;
@@ -674,7 +674,7 @@ void dessinerAccueil() {
                          (erreurChauffe == ERR_TEMP_MAX) ? "ERR TEMP MAX" : "ERR RUNAWAY";
     snprintf(ligne, sizeof(ligne), "%s", defaut);
   } else if (chauffeOn) {
-    snprintf(ligne, sizeof(ligne), "Tc:%3d | On", consigneTemp);
+    snprintf(ligne, sizeof(ligne), "Tc:%3d | ON", consigneTemp);
   } else {
     snprintf(ligne, sizeof(ligne), "Tc:--- | OFF");
   }
