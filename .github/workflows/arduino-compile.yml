@@ -1,0 +1,48 @@
+name: Arduino Mega 2560 - compilation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    name: Compile hotend and motor controller
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Configure Arduino CLI
+        run: arduino-cli config init
+
+      - name: Install Mega 2560 platform
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install arduino:avr
+
+      - name: Install sketch libraries
+        run: arduino-cli lib install U8g2
+
+      - name: Prepare Arduino sketch directory
+        env:
+          SKETCH_FILE: Banc_Hotend_Mega2560_RAMPS14_SH1107_128x128_v2.ino
+        run: |
+          test -f "$SKETCH_FILE"
+          mkdir -p /tmp/arduino-build/Banc_Hotend_Mega2560_RAMPS14_SH1107_128x128_v2
+          cp "$SKETCH_FILE" /tmp/arduino-build/Banc_Hotend_Mega2560_RAMPS14_SH1107_128x128_v2/
+
+      - name: Compile for Arduino Mega 2560
+        run: |
+          arduino-cli compile \
+            --fqbn arduino:avr:mega:cpu=atmega2560 \
+            --warnings all \
+            /tmp/arduino-build/Banc_Hotend_Mega2560_RAMPS14_SH1107_128x128_v2
