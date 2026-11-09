@@ -354,7 +354,7 @@ void gererChauffage() {
   }
 
   // Surtemperature surveillee meme avec chauffe OFF (MOSFET potentiellement colle).
-  if (temperatureC >= TEMP_SECURITE_MAX) {
+  if (mesure >= TEMP_SECURITE_MAX || temperatureC >= TEMP_SECURITE_MAX) {
     if (erreurChauffe != ERR_TEMP_MAX) declencherErreurChauffe(ERR_TEMP_MAX);
     chauffeOn = false;
     couperChauffage();
@@ -804,9 +804,9 @@ void dessinerGestionMoteur() {
   u8g2.drawUTF8(91, 96, val);
 
   if (filSurveillance && !filIn) {
-    u8g2.drawUTF8(2, 110, "BLOQUE : FIL OUT");
+    u8g2.drawUTF8(2, 110, "BLOQUE: FIL OUT");
   } else if (arretFilMemorise) {
-    u8g2.drawUTF8(2, 110, "Fil libere : relancer");
+    u8g2.drawUTF8(2, 110, "Fil libere: relancer");
   }
 
   u8g2.drawHLine(0, 115, 128);
