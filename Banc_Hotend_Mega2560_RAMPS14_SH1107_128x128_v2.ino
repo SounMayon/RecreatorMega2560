@@ -85,7 +85,7 @@ const int TEMP_CONSIGNE_MAX = 280;
 float KP=22.0f, KI=1.08f, KD=114.0f;
 const int EEPROM_PID_ADDR=0;
 const uint32_t EEPROM_PID_MAGIC=0x50494432UL;
-struct DonneesPID { uint32_t magic; uint8_t version; float kp,ki,kd; uint16_t crc; };
+struct DonneesPID { uint32_t magic; uint8_t version; uint8_t reserved[3]; float kp,ki,kd; uint16_t crc; };
 const float AUTOTUNE_CIBLE=220.0f, AUTOTUNE_HYST=2.0f, AUTOTUNE_PWM=180.0f;
 const unsigned long AUTOTUNE_TIMEOUT=720000UL;
 enum EtatAutotune : uint8_t { AT_INACTIF, AT_EN_COURS, AT_OK, AT_ECHEC };
@@ -93,6 +93,8 @@ EtatAutotune autotune=AT_INACTIF;
 unsigned long atDebut=0, atFront=0;
 uint8_t atCycles=0;
 float atPeriodes=0, atAmplitudes=0, atMin=999, atMax=-999;
+float atAncienKP=22.0f, atAncienKI=1.08f, atAncienKD=114.0f;
+bool atEepromVerifiee=false;
 bool atChauffe=false, atPremier=true;
 const float BANDE_PID = 10.0f;
 const unsigned long PERIODE_RUNAWAY_MS = 40000UL;
@@ -314,22 +316,41 @@ bool pidValide(float p,float i,float d) {
 }
 void chargerPID() {
   DonneesPID v; EEPROM.get(EEPROM_PID_ADDR,v);
-  if(v.magic==EEPROM_PID_MAGIC&&v.version==1&&v.crc==crcPID((const uint8_t*)&v,offsetof(DonneesPID,crc))&&pidValide(v.kp,v.ki,v.kd)) { KP=v.kp; KI=v.ki; KD=v.kd; }
+  if(v.magic==EEPROM_PID_MAGIC&&v.version==1&&
+     v.crc==crcPID((const uint8_t*)&v,offsetof(DonneesPID,crc))&&
+     pidValide(v.kp,v.ki,v.kd)) {
+    KP=v.kp; KI=v.ki; KD=v.kd;
+  }
 }
-void sauverPID() {
-  DonneesPID v={EEPROM_PID_MAGIC,1,KP,KI,KD,0};
-  v.crc=crcPID((const uint8_t*)&v,offsetof(DonneesPID,crc)); EEPROM.put(EEPROM_PID_ADDR,v);
+bool sauverPID() {
+  DonneesPID v={EEPROM_PID_MAGIC,1,{0,0,0},KP,KI,KD,0};
+  v.crc=crcPID((const uint8_t*)&v,offsetof(DonneesPID,crc));
+  EEPROM.put(EEPROM_PID_ADDR,v);
+  DonneesPID controle; EEPROM.get(EEPROM_PID_ADDR,controle);
+  return controle.magic==v.magic && controle.version==v.version &&
+         controle.crc==crcPID((const uint8_t*)&controle,offsetof(DonneesPID,crc)) &&
+         pidValide(controle.kp,controle.ki,controle.kd) &&
+         controle.kp==v.kp && controle.ki==v.ki && controle.kd==v.kd;
 }
 void finirAutotune(bool ok) {
   analogWrite(PIN_HEATER,0); pwmChauffe=0; chauffeOn=false; atChauffe=false;
+  atEepromVerifiee=false;
+  if(ok) {
+    atEepromVerifiee=sauverPID();
+    if(!atEepromVerifiee) {
+      KP=atAncienKP; KI=atAncienKI; KD=atAncienKD;
+      ok=false;
+    }
+  }
   autotune=ok?AT_OK:AT_ECHEC;
-  if(ok) sauverPID();
   ecranSale=true;
 }
 bool lancerAutotune() {
   if(!sondeValide||!temperatureInitialisee||erreurChauffe!=ERR_AUCUNE||
      temperatureC>230.0f||temperatureC>=TEMP_SECURITE_MAX-20||moteurActif||moteurDemande) return false;
   chauffeOn=false; couperChauffage(); integralePID=deriveeFiltree=0;
+  atAncienKP=KP; atAncienKI=KI; atAncienKD=KD;
+  atEepromVerifiee=false;
   atDebut=millis(); atFront=0; atCycles=0; atPeriodes=atAmplitudes=0;
   atMin=999; atMax=-999; atPremier=true; atChauffe=true; autotune=AT_EN_COURS;
   analogWrite(PIN_HEATER,(int)AUTOTUNE_PWM); modeUI=UI_AUTOTUNE; ecranSale=true;
@@ -863,14 +884,33 @@ void dessinerEditionTemp() {
 }
 
 void dessinerAutotune() {
-  char s[24];
-  u8g2.setFont(u8g2_font_7x13B_tf); u8g2.drawUTF8(2,14,"AUTOTUNE PID"); u8g2.drawHLine(0,20,128);
+  char s[32], t[12];
+  u8g2.setFont(u8g2_font_7x13B_tf);
+  u8g2.drawUTF8(2,14,"AUTOTUNE PID");
+  u8g2.drawHLine(0,20,128);
+
   u8g2.setFont(u8g2_font_6x12_tf);
-  snprintf(s,sizeof(s),"Cible: 220 C"); u8g2.drawUTF8(2,42,s);
-  snprintf(s,sizeof(s),"Mesure: %.1f C",temperatureC); u8g2.drawUTF8(2,60,s);
-  if(autotune==AT_EN_COURS) { snprintf(s,sizeof(s),"Cycles: %u/5",atCycles); u8g2.drawUTF8(2,82,s); u8g2.drawUTF8(2,105,"Clic: annuler"); }
-  else { u8g2.drawUTF8(2,82,autotune==AT_OK?"PID + EEPROM OK":"Echec / annule"); u8g2.drawUTF8(2,105,"Clic: retour"); }
-  u8g2.setFont(u8g2_font_5x7_tf); u8g2.drawUTF8(2,124,"Surveiller le hotend !");
+  u8g2.drawUTF8(2,39,"Cible: 220 C");
+  dtostrf(temperatureC,1,1,t);
+  snprintf(s,sizeof(s),"Mesure: %s C",(sondeValide&&temperatureInitialisee)?t:"--.-");
+  u8g2.drawUTF8(2,56,s);
+
+  u8g2.setFont(u8g2_font_5x7_tf);
+  if(autotune==AT_EN_COURS) {
+    snprintf(s,sizeof(s),"Cycles: %u/5",atCycles);
+    u8g2.drawUTF8(2,76,s);
+    u8g2.drawUTF8(2,96,"Autotune en cours...");
+    u8g2.drawUTF8(2,126,"◉/◄  Quitter");
+  } else {
+    u8g2.drawHLine(0,65,128);
+    snprintf(s,sizeof(s),"AV P:%.1f I:%.2f D:%.1f",atAncienKP,atAncienKI,atAncienKD);
+    u8g2.drawUTF8(1,77,s);
+    snprintf(s,sizeof(s),"NV P:%.1f I:%.2f D:%.1f",KP,KI,KD);
+    u8g2.drawUTF8(1,89,s);
+    if(autotune==AT_OK) u8g2.drawUTF8(1,105,atEepromVerifiee?"EEPROM: lecture OK":"EEPROM: non verifiee");
+    else u8g2.drawUTF8(1,105,"Echec: anciens PID conserves");
+    u8g2.drawUTF8(2,126,"◉/◄  Quitter");
+  }
 }
 void dessinerGestionMoteur() {
   char val[20];
