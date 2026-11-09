@@ -36,6 +36,7 @@
 #include <U8g2lib.h>
 #include <math.h>
 #include <stdio.h>
+#include <EEPROM.h>
 
 // ---------------- OLED : Grove V2.1 SH1107G, 128x128 ----------------
 U8G2_SH1107_SEEED_128X128_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
@@ -80,9 +81,18 @@ const int TEMP_CONSIGNE_MIN = 50;
 const int TEMP_CONSIGNE_MAX = 280;
 
 // PID de depart : valeurs a valider sur le hotend reel.
-const float KP = 22.0f;
-const float KI = 1.08f;
-const float KD = 114.0f;
+float KP=22.0f, KI=1.08f, KD=114.0f;
+const int EEPROM_PID_ADDR=0;
+const uint32_t EEPROM_PID_MAGIC=0x50494432UL;
+struct DonneesPID { uint32_t magic; uint8_t version; float kp,ki,kd; uint16_t crc; };
+const float AUTOTUNE_CIBLE=220.0f, AUTOTUNE_HYST=2.0f, AUTOTUNE_PWM=180.0f;
+const unsigned long AUTOTUNE_TIMEOUT=720000UL;
+enum EtatAutotune : uint8_t { AT_INACTIF, AT_EN_COURS, AT_OK, AT_ECHEC };
+EtatAutotune autotune=AT_INACTIF;
+unsigned long atDebut=0, atFront=0;
+uint8_t atCycles=0;
+float atPeriodes=0, atAmplitudes=0, atMin=999, atMax=-999;
+bool atChauffe=false, atPremier=true;
 const float BANDE_PID = 10.0f;
 const unsigned long PERIODE_RUNAWAY_MS = 40000UL;
 const float MONTEE_MIN_RUNAWAY = 2.0f;
@@ -120,7 +130,7 @@ bool filSurveillance = false;
 bool filIn = false; // etat filtre : presse = In ; relache = Out
 bool filInitialise = false;
 
-enum ModeUI : uint8_t { UI_ACCUEIL, UI_MENU, UI_EDIT_TEMP, UI_GESTION_MOTEUR };
+enum ModeUI : uint8_t { UI_ACCUEIL, UI_MENU, UI_EDIT_TEMP, UI_GESTION_MOTEUR, UI_AUTOTUNE };
 ModeUI modeUI = UI_ACCUEIL;
 
 enum ItemMenu : uint8_t {
@@ -128,11 +138,12 @@ enum ItemMenu : uint8_t {
   ITEM_CONSIGNE,
   ITEM_MOTEUR,
   ITEM_FIL,
+  ITEM_AUTOTUNE,
   ITEM_RETOUR,
   NB_ITEMS
 };
 const char* const nomsMenu[NB_ITEMS] = {
-  "Chauffage", "Consigne T", "Gestion moteur", "Surveillance Fil", "Retour"
+  "Chauffage", "Consigne T", "Gestion moteur", "Surveillance Fil", "Autotune PID", "Retour"
 };
 uint8_t selectionMenu = 0;
 
@@ -291,6 +302,64 @@ void gererRampeMoteur() {
   reglerFrequenceMoteur(rpmActuel);
 }
 
+
+uint16_t crcPID(const uint8_t* p,size_t n) {
+  uint16_t crc=0xFFFF;
+  while(n--) { crc^=*p++; for(uint8_t j=0;j<8;j++) crc=(crc&1)?(crc>>1)^0xA001:(crc>>1); }
+  return crc;
+}
+bool pidValide(float p,float i,float d) {
+  return isfinite(p)&&isfinite(i)&&isfinite(d)&&p>=1&&p<=200&&i>=0.01f&&i<=20&&d>=0&&d<=1000;
+}
+void chargerPID() {
+  DonneesPID v; EEPROM.get(EEPROM_PID_ADDR,v);
+  if(v.magic==EEPROM_PID_MAGIC&&v.version==1&&v.crc==crcPID((const uint8_t*)&v,offsetof(DonneesPID,crc))&&pidValide(v.kp,v.ki,v.kd)) { KP=v.kp; KI=v.ki; KD=v.kd; }
+}
+void sauverPID() {
+  DonneesPID v={EEPROM_PID_MAGIC,1,KP,KI,KD,0};
+  v.crc=crcPID((const uint8_t*)&v,offsetof(DonneesPID,crc)); EEPROM.put(EEPROM_PID_ADDR,v);
+}
+void finirAutotune(bool ok) {
+  analogWrite(PIN_HEATER,0); pwmChauffe=0; chauffeOn=false; atChauffe=false;
+  autotune=ok?AT_OK:AT_ECHEC;
+  if(ok) sauverPID();
+  ecranSale=true;
+}
+bool lancerAutotune() {
+  if(!sondeValide||!temperatureInitialisee||erreurChauffe!=ERR_AUCUNE||
+     temperatureC>230.0f||temperatureC>=TEMP_SECURITE_MAX-20||moteurActif||moteurDemande) return false;
+  chauffeOn=false; couperChauffage(); integralePID=deriveeFiltree=0;
+  atDebut=millis(); atFront=0; atCycles=0; atPeriodes=atAmplitudes=0;
+  atMin=999; atMax=-999; atPremier=true; atChauffe=true; autotune=AT_EN_COURS;
+  analogWrite(PIN_HEATER,(int)AUTOTUNE_PWM); modeUI=UI_AUTOTUNE; ecranSale=true;
+  return true;
+}
+void gererAutotune(float t,unsigned long now) {
+  if(autotune!=AT_EN_COURS) return;
+  if(!sondeValide||erreurChauffe!=ERR_AUCUNE||t>=235.0f||t>=TEMP_SECURITE_MAX-20||now-atDebut>AUTOTUNE_TIMEOUT) { finirAutotune(false); return; }
+  if(t<atMin) atMin=t; if(t>atMax) atMax=t;
+  bool next=atChauffe;
+  if(atChauffe&&t>=AUTOTUNE_CIBLE+AUTOTUNE_HYST) next=false;
+  if(!atChauffe&&t<=AUTOTUNE_CIBLE-AUTOTUNE_HYST) next=true;
+  if(next!=atChauffe) {
+    if(!next) {
+      if(!atPremier) {
+        float per=(now-atFront)/1000.0f, amp=(atMax-atMin)*0.5f;
+        if(per>=5&&per<=180&&amp>=0.5f&&amp<=20) { atPeriodes+=per; atAmplitudes+=amp; atCycles++; }
+      }
+      atFront=now; atPremier=false; atMin=t; atMax=t;
+    }
+    atChauffe=next; analogWrite(PIN_HEATER,next?(int)AUTOTUNE_PWM:0);
+  }
+  if(atCycles>=5) {
+    float tu=atPeriodes/atCycles, amp=atAmplitudes/atCycles;
+    float ku=(4.0f*(AUTOTUNE_PWM*0.5f))/(3.14159265f*amp);
+    float p=0.60f*ku, i=1.20f*ku/tu, d=0.075f*ku*tu;
+    if(pidValide(p,i,d)) { KP=p; KI=i; KD=d; finirAutotune(true); }
+    else finirAutotune(false);
+  }
+}
+
 // ---------------- Chauffage / mesure thermistance ----------------
 bool lireTemperature(float &tempC) {
   uint32_t somme = 0;
@@ -366,6 +435,7 @@ void gererChauffage() {
     return;
   }
 
+  if(autotune==AT_EN_COURS) { gererAutotune(mesure,maintenant); return; }
   if (!chauffeOn) {
     couperChauffage();
     integralePID = 0.0f;
@@ -549,6 +619,9 @@ void selectionnerMenu() {
         arreterMoteurPhysiquement();
       }
       break;
+    case ITEM_AUTOTUNE:
+      lancerAutotune();
+      break;
     case ITEM_RETOUR:
       modeUI = UI_ACCUEIL;
       break;
@@ -573,6 +646,10 @@ void gererInterface() {
   uint8_t b = lireEvenementBouton();
   if (d != DIR_NONE || b != BTN_AUCUN) derniereActivite = millis();
 
+  if(modeUI==UI_AUTOTUNE) {
+    if(b==BTN_COURT||b==BTN_LONG||d==Y_MOINS) { if(autotune==AT_EN_COURS) finirAutotune(false); modeUI=UI_MENU; ecranSale=true; }
+    return;
+  }
   switch (modeUI) {
     case UI_ACCUEIL:
       if (d == Y_PLUS) {
@@ -782,6 +859,16 @@ void dessinerEditionTemp() {
   u8g2.drawUTF8(2, 125, "◉ : valider  ▼ : retour");
 }
 
+void dessinerAutotune() {
+  char s[24];
+  u8g2.setFont(u8g2_font_7x13B_tf); u8g2.drawUTF8(2,14,"AUTOTUNE PID"); u8g2.drawHLine(0,20,128);
+  u8g2.setFont(u8g2_font_6x12_tf);
+  snprintf(s,sizeof(s),"Cible: 220 C"); u8g2.drawUTF8(2,42,s);
+  snprintf(s,sizeof(s),"Mesure: %.1f C",temperatureC); u8g2.drawUTF8(2,60,s);
+  if(autotune==AT_EN_COURS) { snprintf(s,sizeof(s),"Cycles: %u/5",atCycles); u8g2.drawUTF8(2,82,s); u8g2.drawUTF8(2,105,"Clic: annuler"); }
+  else { u8g2.drawUTF8(2,82,autotune==AT_OK?"PID + EEPROM OK":"Echec / annule"); u8g2.drawUTF8(2,105,"Clic: retour"); }
+  u8g2.setFont(u8g2_font_5x7_tf); u8g2.drawUTF8(2,124,"Surveiller le hotend !");
+}
 void dessinerGestionMoteur() {
   char val[20];
   u8g2.setFont(u8g2_font_7x13B_tf);
@@ -825,6 +912,7 @@ void rafraichirEcran() {
   if (modeUI == UI_ACCUEIL) dessinerAccueil();
   else if (modeUI == UI_MENU) dessinerMenu();
   else if (modeUI == UI_EDIT_TEMP) dessinerEditionTemp();
+  else if (modeUI == UI_AUTOTUNE) dessinerAutotune();
   else dessinerGestionMoteur();
   u8g2.sendBuffer();
 }
@@ -894,6 +982,7 @@ void setup() {
 
   Serial.begin(115200);
 
+  chargerPID();
   Wire.begin();
   Wire.setClock(100000);
   u8g2.begin();
