@@ -903,9 +903,12 @@ void dessinerAutotune() {
     u8g2.drawUTF8(2,126,"◉/◄  Quitter");
   } else {
     u8g2.drawHLine(0,65,128);
-    snprintf(s,sizeof(s),"AV P:%.1f I:%.2f D:%.1f",atAncienKP,atAncienKI,atAncienKD);
+    char p[9],i[9],d[9];
+    dtostrf(atAncienKP,1,1,p); dtostrf(atAncienKI,1,2,i); dtostrf(atAncienKD,1,1,d);
+    snprintf(s,sizeof(s),"AV P:%s I:%s D:%s",p,i,d);
     u8g2.drawUTF8(1,77,s);
-    snprintf(s,sizeof(s),"NV P:%.1f I:%.2f D:%.1f",KP,KI,KD);
+    dtostrf(KP,1,1,p); dtostrf(KI,1,2,i); dtostrf(KD,1,1,d);
+    snprintf(s,sizeof(s),"NV P:%s I:%s D:%s",p,i,d);
     u8g2.drawUTF8(1,89,s);
     if(autotune==AT_OK) u8g2.drawUTF8(1,105,atEepromVerifiee?"EEPROM: lecture OK":"EEPROM: non verifiee");
     else u8g2.drawUTF8(1,105,"Echec: anciens PID conserves");
