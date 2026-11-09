@@ -36,6 +36,7 @@
 #include <U8g2lib.h>
 #include <math.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <EEPROM.h>
 
 // ---------------- OLED : Grove V2.1 SH1107G, 128x128 ----------------
