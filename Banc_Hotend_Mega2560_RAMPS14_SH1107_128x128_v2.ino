@@ -408,6 +408,7 @@ void gererChauffage() {
   float mesure;
   sondeValide = lireTemperature(mesure);
   if (!sondeValide) {
+    if (autotune == AT_EN_COURS) finirAutotune(false);
     temperatureInitialisee = false;
     couperChauffage();
     if (erreurChauffe == ERR_AUCUNE) declencherErreurChauffe(ERR_SONDE);
@@ -424,6 +425,7 @@ void gererChauffage() {
 
   // Surtemperature surveillee meme avec chauffe OFF (MOSFET potentiellement colle).
   if (mesure >= TEMP_SECURITE_MAX || temperatureC >= TEMP_SECURITE_MAX) {
+    if (autotune == AT_EN_COURS) finirAutotune(false);
     if (erreurChauffe != ERR_TEMP_MAX) declencherErreurChauffe(ERR_TEMP_MAX);
     chauffeOn = false;
     couperChauffage();
@@ -820,7 +822,7 @@ void dessinerMenu() {
 
   u8g2.setFont(u8g2_font_6x12_tf);
   for (uint8_t i = 0; i < NB_ITEMS; ++i) {
-    int y = 37 + i * 17;
+    int y = 32 + i * 15;
     if (i == selectionMenu) {
       u8g2.drawBox(0, y - 12, 128, 15);
       u8g2.setDrawColor(0);
