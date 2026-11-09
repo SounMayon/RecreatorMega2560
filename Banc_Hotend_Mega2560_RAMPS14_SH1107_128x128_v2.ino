@@ -682,7 +682,7 @@ void dessinerAccueil() {
     dessinerFleche(64, 85, sensFwd); // Recentré à x=64 pour un écran 128px
   }
   u8g2.drawVLine(88, 78, 15); // Ligne verticale séparatrice déplacée à x=88 (11 chars * 8px = 88px)
-  u8g2.drawUTF8(96, 90, (moteurDemande || moteurActif) ? "On " : "Off");
+  u8g2.drawUTF8(96, 90, (moteurDemande || moteurActif) ? "ON " : "OFF");
 
 
   // ==========================================
@@ -699,7 +699,7 @@ void dessinerAccueil() {
   u8g2.drawUTF8(0, 122, ligne); // Aligné tout en bas (y=122, garde 6px de marge sous la police)
 
   u8g2.drawVLine(88, 110, 15); // Aligné exactement sur la ligne verticale du dessus (x=88)
-  u8g2.drawUTF8(96, 122, filSurveillance ? "On " : "Off");
+  u8g2.drawUTF8(96, 122, filSurveillance ? "ON " : "OFF");
 }
 
 
@@ -719,10 +719,10 @@ void dessinerMenu() {
     u8g2.drawUTF8(4, y, nomsMenu[i]);
 
     val[0] = '\0';
-    if (i == ITEM_CHAUFFE) snprintf(val, sizeof(val), "%s", chauffeOn ? "On" : "Off");
+    if (i == ITEM_CHAUFFE) snprintf(val, sizeof(val), "%s", chauffeOn ? "ON" : "OFF");
     if (i == ITEM_CONSIGNE) snprintf(val, sizeof(val), "%dC", consigneTemp);
-    if (i == ITEM_MOTEUR) snprintf(val, sizeof(val), "%s", moteurDemande ? "On" : "Off");
-    if (i == ITEM_FIL) snprintf(val, sizeof(val), "%s", filSurveillance ? "On" : "Off");
+    if (i == ITEM_MOTEUR) snprintf(val, sizeof(val), "%s", moteurDemande ? "ON" : "OFF");
+    if (i == ITEM_FIL) snprintf(val, sizeof(val), "%s", filSurveillance ? "ON" : "OFF");
     if (val[0]) {
       int w = u8g2.getUTF8Width(val);
       u8g2.drawUTF8(124 - w, y, val);
@@ -731,7 +731,7 @@ void dessinerMenu() {
   }
   u8g2.drawHLine(0, 121, 128);
   u8g2.setFont(u8g2_font_5x7_tf);
-  u8g2.drawUTF8(2, 127, "X+/-: naviguer  Y+: choisir");
+  u8g2.drawUTF8(2, 127, "◄/►: naviguer  ▲: choisir");
 }
 
 void dessinerEditionTemp() {
@@ -746,8 +746,8 @@ void dessinerEditionTemp() {
   int w = u8g2.getUTF8Width(val);
   u8g2.drawUTF8((128 - w) / 2, 82, val);
   u8g2.setFont(u8g2_font_5x7_tf);
-  u8g2.drawUTF8(2, 111, "X+/- : modifier");
-  u8g2.drawUTF8(2, 125, "Bouton : valider");
+  u8g2.drawUTF8(2, 111, "◄/► : modifier");
+  u8g2.drawUTF8(2, 125, "◉ : valider  ▼ : retour");
 }
 
 void dessinerGestionMoteur() {
@@ -757,17 +757,17 @@ void dessinerGestionMoteur() {
   u8g2.drawHLine(0, 20, 128);
 
   u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawUTF8(2, 39, "Etat :");
-  u8g2.drawUTF8(53, 39, moteurDemande ? "MARCHE" : "ARRET");
+  u8g2.drawUTF8(2, 39, "Etat:");
+  u8g2.drawUTF8(53, 39, moteurDemande ? "ON" : "OFF");
 
-  u8g2.drawUTF8(2, 58, "Sens :");
+  u8g2.drawUTF8(2, 58, "Sens:");
   u8g2.drawUTF8(53, 58, sensFwd ? "FWD  ->" : "REV  <-");
 
-  u8g2.drawUTF8(2, 77, "Vitesse :");
+  u8g2.drawUTF8(2, 77, "Vitesse:");
   snprintf(val, sizeof(val), "%u %%", vitessePct);
   u8g2.drawUTF8(72, 77, val);
 
-  u8g2.drawUTF8(2, 96, "RPM limite :");
+  u8g2.drawUTF8(2, 96, "RPM limite:");
   snprintf(val, sizeof(val), "%u", MAX_RPM_MOTEUR);
   u8g2.drawUTF8(91, 96, val);
 
@@ -779,8 +779,8 @@ void dessinerGestionMoteur() {
 
   u8g2.drawHLine(0, 115, 128);
   u8g2.setFont(u8g2_font_5x7_tf);
-  u8g2.drawUTF8(2, 121, "X+/- : vitesse  Y+ : FWD");
-  u8g2.drawUTF8(2, 127, "Y- : REV  Clic : marche/arret");
+  u8g2.drawUTF8(2, 121, "◄/► : vitesse  ▲ : FWD");
+  u8g2.drawUTF8(2, 127, "▼ : REV  ◉ : ON/OFF");
 }
 
 void rafraichirEcran() {
