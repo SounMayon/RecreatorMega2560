@@ -637,14 +637,22 @@ void dessinerFleche(int x, int y, bool droite) {
 void dessinerAccueil() {
   char ligne[24];
 
-  // Ligne 1 : Tc : consigne | On/Off
-  u8g2.setFont(u8g2_font_6x12_tf);
-  if (chauffeOn) snprintf(ligne, sizeof(ligne), "Tc:%3d | On", consigneTemp);
-  else snprintf(ligne, sizeof(ligne), "Tc:--- | Off");
-  u8g2.drawUTF8(3, 17, ligne);
+  // ==========================================
+  // LIGNE 1 : Tc (13 caractéristiques max -> police 9x15, x=0 à 117px)
+  // ==========================================
+  u8g2.setFont(u8g2_font_9x15_tf); // Largeur 9px fixe, hauteur ~15px
+  if (chauffeOn) {
+    snprintf(ligne, sizeof(ligne), "Tc:%3d | On", consigneTemp);
+  } else {
+    snprintf(ligne, sizeof(ligne), "Tc:--- | Off");
+  }
+  u8g2.drawUTF8(0, 15, ligne); // Aligné à gauche, y=15 pour laisser de l'espace au-dessus
 
-  // Temperature mesuree au centre
-  u8g2.setFont(u8g2_font_helvB18_tf);
+
+  // ==========================================
+  // LIGNE 2 : Température centrale (6 caractères -> police massive)
+  // ==========================================
+  u8g2.setFont(u8g2_font_inb24_mf); // Largeur ~20px par chiffre, hauteur 24px (très visible)
   if (sondeValide && temperatureInitialisee) {
     char t[12];
     dtostrf(temperatureC, 1, 1, t);
@@ -653,29 +661,47 @@ void dessinerAccueil() {
     snprintf(ligne, sizeof(ligne), "--.-C");
   }
   int largeur = u8g2.getUTF8Width(ligne);
-  u8g2.drawUTF8((128 - largeur) / 2, 62, ligne);
+  u8g2.drawUTF8((128 - largeur) / 2, 58, ligne); // Centrage parfait au milieu de la zone
 
-  // Ligne moteur : pourcentage, fleche de sens, On/Off
-  u8g2.setFont(u8g2_font_6x12_tf);
+
+  // ==========================================
+  // LIGNE 3 : Moteur (16 caractères max -> police 8x13, x=0 à 128px)
+  // ==========================================
+  u8g2.setFont(u8g2_font_8x13_tf); // Largeur 8px fixe, hauteur ~13px
+  
+  // Remplissage complet de la ligne avec formatage strict à 16 caractères
   if (moteurDemande || moteurActif) {
-    snprintf(ligne, sizeof(ligne), "Vm:%3u", vitessePct);
+    snprintf(ligne, sizeof(ligne), "Vm:%3u           ", vitessePct); // Les espaces comblent la ligne
   } else {
-    snprintf(ligne, sizeof(ligne), "Vm:---");
+    snprintf(ligne, sizeof(ligne), "Vm:---           ");
   }
-  u8g2.drawUTF8(3, 94, ligne);
-  if (moteurDemande || moteurActif) {
-    dessinerFleche(61, 89, sensFwd);
-  }
-  u8g2.drawVLine(83, 81, 17);
-  u8g2.drawUTF8(91, 94, (moteurDemande || moteurActif) ? "On" : "Off");
+  u8g2.drawUTF8(0, 90, ligne); // Aligné au pixel 0
 
-  // Ligne Fil : etat In/Out, surveillance On/Off
-  u8g2.drawHLine(2, 104, 124);
-  snprintf(ligne, sizeof(ligne), "Fil:%s", filIn ? "In" : "Out");
-  u8g2.drawUTF8(3, 123, ligne);
-  u8g2.drawVLine(83, 110, 17);
-  u8g2.drawUTF8(91, 123, filSurveillance ? "On" : "Off");
+  // Superposition de la flèche et du statut sur la police monospacée
+  if (moteurDemande || moteurActif) {
+    dessinerFleche(64, 85, sensFwd); // Recentré à x=64 pour un écran 128px
+  }
+  u8g2.drawVLine(88, 78, 15); // Ligne verticale séparatrice déplacée à x=88 (11 chars * 8px = 88px)
+  u8g2.drawUTF8(96, 90, (moteurDemande || moteurActif) ? "On " : "Off");
+
+
+  // ==========================================
+  // LIGNE 4 : Séparation de bout en bout (0 à 128 px)
+  // ==========================================
+  u8g2.drawHLine(0, 102, 128); // Exploite les 128 pixels de large
+
+
+  // ==========================================
+  // LIGNE 5 : Fil (16 caractères max -> police 8x13, x=0 à 128px)
+  // ==========================================
+  // Utilisation de la même police 8x13 déjà chargée pour économiser la mémoire flash
+  snprintf(ligne, sizeof(ligne), "Fil:%-3s         ", filIn ? "In" : "Out"); // %-3s force 3 caractères de large à gauche
+  u8g2.drawUTF8(0, 122, ligne); // Aligné tout en bas (y=122, garde 6px de marge sous la police)
+
+  u8g2.drawVLine(88, 110, 15); // Aligné exactement sur la ligne verticale du dessus (x=88)
+  u8g2.drawUTF8(96, 122, filSurveillance ? "On " : "Off");
 }
+
 
 void dessinerMenu() {
   char val[20];
@@ -839,7 +865,7 @@ void setup() {
   Wire.begin();
   Wire.setClock(100000);
   u8g2.begin();
-  u8g2.setContrast(180);
+  u8g2.setContrast(32);
 
   sensFwd = true;
   filIn = false;
