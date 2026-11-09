@@ -91,6 +91,7 @@ const float MONTEE_MIN_RUNAWAY = 2.0f;
 const unsigned long PERIODE_DEBUG_MS = 1000UL;
 const unsigned long PERIODE_ECRAN_MS = 150UL;
 const unsigned long APPUI_LONG_MS = 1500UL;
+const unsigned long FIL_ANTI_REBOND_MS = 30UL;
 
 // ---------------- Etats ----------------
 enum ErreurChauffe : uint8_t { ERR_AUCUNE, ERR_SONDE, ERR_TEMP_MAX, ERR_RUNAWAY };
@@ -114,7 +115,8 @@ float rpmActuel = 0.0f;
 bool arretFilMemorise = false;
 
 bool filSurveillance = false;
-bool filIn = false; // presse = In ; relache = Out
+bool filIn = false; // etat filtre : presse = In ; relache = Out
+bool filInitialise = false;
 
 enum ModeUI : uint8_t { UI_ACCUEIL, UI_MENU, UI_EDIT_TEMP, UI_GESTION_MOTEUR };
 ModeUI modeUI = UI_ACCUEIL;
@@ -222,8 +224,8 @@ void demarrerMoteurPhysiquement() {
 }
 
 void demanderArretMoteur() {
+  // Arret utilisateur avec deceleration geree par gererRampeMoteur().
   moteurDemande = false;
-  arreterMoteurPhysiquement();
   ecranSale = true;
 }
 
@@ -337,7 +339,8 @@ void gererChauffage() {
   if (!sondeValide) {
     temperatureInitialisee = false;
     couperChauffage();
-    if (chauffeOn) declencherErreurChauffe(ERR_SONDE);
+    if (erreurChauffe == ERR_AUCUNE) declencherErreurChauffe(ERR_SONDE);
+    chauffeOn = false;
     return;
   }
 
@@ -348,8 +351,16 @@ void gererChauffage() {
     temperatureC = 0.7f * temperatureC + 0.3f * mesure;
   }
 
-  if (chauffeOn && temperatureC >= TEMP_SECURITE_MAX) {
-    declencherErreurChauffe(ERR_TEMP_MAX);
+  // Surtemperature surveillee meme avec chauffe OFF (MOSFET potentiellement colle).
+  if (temperatureC >= TEMP_SECURITE_MAX) {
+    if (erreurChauffe != ERR_TEMP_MAX) declencherErreurChauffe(ERR_TEMP_MAX);
+    chauffeOn = false;
+    couperChauffage();
+    return;
+  }
+  if (erreurChauffe != ERR_AUCUNE) {
+    chauffeOn = false;
+    couperChauffage();
     return;
   }
 
@@ -401,9 +412,24 @@ void gererChauffage() {
 
 // ---------------- Switch Fil NO ----------------
 void lireFil() {
-  // Switch NO entre D3 et GND : ferme/presse => LOW.
+  static bool niveauBrutPrecedent = HIGH;
+  static bool niveauStable = HIGH;
+  static unsigned long changementBrut = 0;
   bool niveau = digitalRead(PIN_FIL);
-  filIn = FIL_PRESSE_EST_LOW ? (niveau == LOW) : (niveau == HIGH);
+  unsigned long maintenant = millis();
+  if (!filInitialise) {
+    niveauBrutPrecedent = niveau;
+    niveauStable = niveau;
+    changementBrut = maintenant;
+    filInitialise = true;
+  }
+  if (niveau != niveauBrutPrecedent) {
+    niveauBrutPrecedent = niveau;
+    changementBrut = maintenant;
+  }
+  if (maintenant - changementBrut >= FIL_ANTI_REBOND_MS && niveauStable != niveauBrutPrecedent)
+    niveauStable = niveauBrutPrecedent;
+  filIn = FIL_PRESSE_EST_LOW ? (niveauStable == LOW) : (niveauStable == HIGH);
 }
 
 // ---------------- Joystick : directions et repetiteur ----------------
@@ -434,7 +460,9 @@ uint8_t lireDirectionEvenement() {
     prochaineRepetition = maintenant + 350;
     return actuelle;
   }
-  if ((long)(maintenant - prochaineRepetition) >= 0) {
+  // Les axes X se repetent pour le reglage; Haut/Bas restent ponctuels.
+  if ((actuelle == X_PLUS || actuelle == X_MOINS) &&
+      (long)(maintenant - prochaineRepetition) >= 0) {
     prochaineRepetition = maintenant + 130;
     return actuelle;
   }
@@ -641,10 +669,14 @@ void dessinerAccueil() {
   // LIGNE 1 : Tc (13 caractéristiques max -> police 9x15, x=0 à 117px)
   // ==========================================
   u8g2.setFont(u8g2_font_9x15_tf); // Largeur 9px fixe, hauteur ~15px
-  if (chauffeOn) {
+  if (erreurChauffe != ERR_AUCUNE) {
+    const char* defaut = (erreurChauffe == ERR_SONDE) ? "ERR SONDE" :
+                         (erreurChauffe == ERR_TEMP_MAX) ? "ERR TEMP MAX" : "ERR RUNAWAY";
+    snprintf(ligne, sizeof(ligne), "%s", defaut);
+  } else if (chauffeOn) {
     snprintf(ligne, sizeof(ligne), "Tc:%3d | On", consigneTemp);
   } else {
-    snprintf(ligne, sizeof(ligne), "Tc:--- | Off");
+    snprintf(ligne, sizeof(ligne), "Tc:--- | OFF");
   }
   u8g2.drawUTF8(0, 15, ligne); // Aligné à gauche, y=15 pour laisser de l'espace au-dessus
 
@@ -731,7 +763,7 @@ void dessinerMenu() {
   }
   u8g2.drawHLine(0, 121, 128);
   u8g2.setFont(u8g2_font_5x7_tf);
-  u8g2.drawUTF8(2, 127, "◄/►: naviguer  ▲: choisir");
+  u8g2.drawUTF8(2, 127, "◄/►:haut/bas ▲:OK ▼:retour");
 }
 
 void dessinerEditionTemp() {
