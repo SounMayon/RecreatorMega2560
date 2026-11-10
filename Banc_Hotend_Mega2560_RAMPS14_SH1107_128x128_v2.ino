@@ -809,4 +809,235 @@ void dessinerMenu() {
     }
     u8g2.drawUTF8(2, y, nomsMenu[i]);
 
-    val[0] = '
+     val[0] = '';
+    if (i == ITEM_CHAUFFE) snprintf(val, sizeof(val), "%s", chauffeOn ? "ON" : "OFF");
+    if (i == ITEM_CONSIGNE) snprintf(val, sizeof(val), "%d°C", consigneTemp);
+    if (i == ITEM_MOTEUR) snprintf(val, sizeof(val), "%s", moteurDemande ? "ON" : "OFF");
+    if (i == ITEM_FIL) snprintf(val, sizeof(val), "%s", filSurveillance ? "ON" : "OFF");
+    if (val[0]) {
+      int w = u8g2.getUTF8Width(val);
+      u8g2.drawUTF8(122 - w, y, val);
+    }
+    u8g2.setDrawColor(1);
+  }
+  
+  u8g2.drawHLine(0, 115, 128);
+  u8g2.setFont(u8g2_font_7x13_tf);
+  u8g2.drawUTF8(0, 127, "^v:Nav O:Sel <:Esc");
+}
+
+void dessinerEditionTemp() {
+  char val[16];
+  u8g2.setFont(u8g2_font_7x14_tf);
+  u8g2.drawUTF8(0, 14, "  CONSIGNE CHAUFFE");
+  u8g2.drawHLine(0, 19, 128);
+  
+  u8g2.setFont(u8g2_font_9x15_tf);
+  u8g2.drawUTF8(0, 38, "  Temp cible");
+  
+  snprintf(val, sizeof(val), "%d C", consigneTemp);
+  u8g2.setFont(u8g2_font_helvB24_tf);
+  int w = u8g2.getUTF8Width(val);
+  u8g2.drawUTF8((128 - w) / 2, 75, val);
+  
+  u8g2.drawHLine(0, 95, 128);
+  u8g2.setFont(u8g2_font_6x12_tf);
+  u8g2.drawUTF8(4, 110, "v|^: Dec | Inc");
+  
+  // Dessin d'un point de validation matériel (cercle concentrique en pixels)
+  u8g2.drawCircle(8, 121, 3);
+  u8g2.drawPixel(8, 121);
+  u8g2.drawUTF8(16, 124, ": Conf <: Esc");
+}
+
+void dessinerAutotune() {
+  char s[32], t[12];
+  u8g2.setFont(u8g2_font_7x14_tf);
+  u8g2.drawUTF8(0, 14, "    AUTOTUNE PID");
+  u8g2.drawHLine(0, 19, 128);
+
+  u8g2.setFont(u8g2_font_7x14_tf);
+  u8g2.drawUTF8(4, 36, "Cible : 220 C");
+  dtostrf(temperatureC, 1, 1, t);
+  snprintf(s, sizeof(s), "Mesure : %s C", (sondeValide && temperatureInitialisee) ? t : "--.-");
+  u8g2.drawUTF8(4, 52, s);
+
+  if(autotune == AT_EN_COURS) {
+    snprintf(s, sizeof(s), "Cycles : %u/5", atCycles);
+    u8g2.drawUTF8(4, 68, s);
+    u8g2.drawUTF8(4, 95, "En cours...");
+    u8g2.drawHLine(0, 115, 128);
+    
+    u8g2.drawCircle(8, 122, 3); u8g2.drawPixel(8, 122);
+    u8g2.drawUTF8(16, 126, "|< Quitter|Arreter");
+  } else {
+    u8g2.drawHLine(0, 62, 128);
+    char p[9], i[9], d[9];
+    dtostrf(atAncienKP, 1, 1, p); dtostrf(atAncienKI, 1, 2, i); dtostrf(atAncienKD, 1, 1, d);
+    snprintf(s, sizeof(s), "A P%s I%s D%s", p, i, d);
+    u8g2.drawUTF8(2, 76, s);
+    dtostrf(KP, 1, 1, p); dtostrf(KI, 1, 2, i); dtostrf(KD, 1, 1, d);
+    snprintf(s, sizeof(s), "N P%s I%s D%s", p, i, d);
+    u8g2.drawUTF8(2, 90, s);
+    if(autotune == AT_OK) u8g2.drawUTF8(4, 106, atEepromVerifiee ? "EEPROM : Save OK" : "EEPROM : Non verifiee");
+    else u8g2.drawUTF8(4, 106, "Echec : Anciens PID gardes");
+    u8g2.drawHLine(0, 115, 128);
+    
+    u8g2.drawCircle(8, 122, 3); u8g2.drawPixel(8, 122);
+    u8g2.drawUTF8(16, 126, " | <  Quitter");
+  }
+}
+
+void dessinerGestionMoteur() {
+  char val[20];
+  u8g2.setFont(u8g2_font_7x14_tf);
+  u8g2.drawUTF8(0, 14, "   GESTION MOTEUR");
+  u8g2.drawHLine(0, 19, 128);
+
+  u8g2.setFont(u8g2_font_7x14_tf);
+  u8g2.drawUTF8(4, 35, "Etat :");
+  u8g2.drawUTF8(55, 35, moteurDemande ? "ON" : "OFF");
+
+  u8g2.drawUTF8(4, 51, "Sens :");
+  u8g2.drawUTF8(55, 51, sensFwd ? "FWD" : "REV");
+  if (sensFwd) {
+    u8g2.drawTriangle(85, 45, 85, 53, 90, 49);
+  } else {
+    u8g2.drawTriangle(90, 45, 90, 53, 85, 49);
+  }
+
+  u8g2.drawUTF8(4, 67, "Vm :");
+  snprintf(val, sizeof(val), "%u %%", vitessePct);
+  u8g2.drawUTF8(55, 67, val);
+
+  u8g2.drawUTF8(4, 83, "RPM max:");
+  snprintf(val, sizeof(val), "%utr/min", MAX_RPM_MOTEUR);
+  u8g2.drawUTF8(65, 83, val);
+
+  if (filSurveillance && !filIn) {
+    u8g2.drawUTF8(6, 99, "FIL OUT : BLOQUE");
+  } else if (arretFilMemorise) {
+    u8g2.drawUTF8(6, 99, "FIL IN : DEBLOQUE");
+  }
+
+  u8g2.drawHLine(0, 105, 128);
+  u8g2.setFont(u8g2_font_6x12_tf);
+  u8g2.drawUTF8(0, 116, "^|v:Vm >:FWD <:REV");
+  
+  u8g2.drawCircle(8, 124, 3); u8g2.drawPixel(8, 124);
+  u8g2.drawUTF8(16, 127, ": ON/OFF moteur");
+}
+
+void rafraichirEcran() {
+  unsigned long maintenant = millis();
+  if (!ecranSale && maintenant - derniereMajEcran < PERIODE_ECRAN_MS) return;
+  derniereMajEcran = maintenant;
+  ecranSale = false;
+
+  u8g2.clearBuffer();
+  if (modeUI == UI_ACCUEIL) dessinerAccueil();
+  else if (modeUI == UI_MENU) dessinerMenu();
+  else if (modeUI == UI_EDIT_TEMP) dessinerEditionTemp();
+  else if (modeUI == UI_AUTOTUNE) dessinerAutotune();
+  else dessinerGestionMoteur();
+  u8g2.sendBuffer();
+}
+
+void gererDebugSerie() {
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == 'D' || c == 'd') {
+      debugActif = true;
+      Serial.println(F("[DEBUG] ON"));
+    } else if (c == 'O' || c == 'o') {
+      debugActif = false;
+      Serial.println(F("[DEBUG] OFF"));
+    } else if (c == '?') {
+      Serial.println(F("D=debug ON, O=debug OFF, ?=aide"));
+    }
+  }
+}
+
+void imprimerDebug() {
+  static unsigned long precedent = 0;
+  unsigned long maintenant = millis();
+  if (!debugActif || maintenant - precedent < PERIODE_DEBUG_MS) return;
+  precedent = maintenant;
+
+  Serial.print(F("[ETAT] T="));
+  if (sondeValide && temperatureInitialisee) Serial.print(temperatureC, 1);
+  else Serial.print(F("INVALIDE"));
+  Serial.print(F("C Tc="));
+  Serial.print(consigneTemp);
+  Serial.print(F(" Chauffe="));
+  Serial.print(chauffeOn ? F("ON") : F("OFF"));
+  Serial.print(F(" PWM="));
+  Serial.print((int)pwmChauffe);
+  Serial.print(F(" Moteur="));
+  Serial.print(moteurDemande ? F("ON") : F("OFF"));
+  Serial.print(F(" Sens="));
+  Serial.print(sensFwd ? F("FWD") : F("REV"));
+  Serial.print(F(" Vm="));
+  Serial.print(vitessePct);
+  Serial.print(F("% RPM="));
+  Serial.print(rpmActuel, 1);
+  Serial.print(F(" Fil="));
+  Serial.print(filIn ? F("In") : F("Out"));
+  Serial.print(F(" Surveillance="));
+  Serial.print(filSurveillance ? F("ON") : F("OFF"));
+  Serial.print(F(" UI="));
+  Serial.println(modeUI);
+}
+
+void setup() {
+  pinMode(PIN_HEATER, OUTPUT);
+  digitalWrite(PIN_HEATER, LOW);
+
+  pinMode(PIN_STEP, OUTPUT);
+  pinMode(PIN_DIR, OUTPUT);
+  pinMode(PIN_EN, OUTPUT);
+  digitalWrite(PIN_STEP, LOW);
+  digitalWrite(PIN_DIR, DIR_FWD_LEVEL);
+  digitalWrite(PIN_EN, HIGH);
+
+  pinMode(PIN_FIL, INPUT_PULLUP);
+  pinMode(PIN_JOY_SW, INPUT_PULLUP);
+
+  Serial.begin(115200);
+
+  chargerPID();
+  Wire.begin();
+  Wire.setClock(100000);
+  u8g2.begin();
+  u8g2.setContrast(32);
+
+  sensFwd = true;
+  filIn = false;
+  derniereActivite = millis();
+  ecranSale = true;
+
+  if (debugActif) {
+    Serial.println();
+    Serial.println(F("=== BANC HOTEND / MOTEUR - SH1107 128x128 ==="));
+  }
+}
+
+void loop() {
+  gererDebugSerie();
+  lireFil();
+
+  if (filSurveillance && FIL_ARRET_MOTEUR_SI_OUT && !filIn &&
+      (moteurDemande || moteurActif)) {
+    moteurDemande = false;
+    arretFilMemorise = true;
+    arreterMoteurPhysiquement();
+    if (debugActif) Serial.println(F("[FIL] Out : moteur coupe."));
+    ecranSale = true;
+  }
+
+  gererChauffage();
+  gererRampeMoteur();
+  gererInterface();
+  rafraichirEcran();
+  imprimerDebug();
+}
