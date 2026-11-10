@@ -94,7 +94,6 @@ float atEepromKP=0.0f, atEepromKI=0.0f, atEepromKD=0.0f;
 bool atEepromValide=false, atChoixOui=true, atSauvegardeRefusee=false;
 enum EtatEcranAutotune : uint8_t { AT_UI_PREPARATION, AT_UI_RUN, AT_UI_SAUVEGARDE, AT_UI_TERMINE };
 EtatEcranAutotune atEcran=AT_UI_PREPARATION;
-ModeUI modeRetourMoteur=UI_ACCUEIL;
 const float BANDE_PID = 10.0f;
 const unsigned long PERIODE_RUNAWAY_MS = 40000UL;
 const float MONTEE_MIN_RUNAWAY = 2.0f;
@@ -133,6 +132,7 @@ bool filInitialise = false;
 
 enum ModeUI : uint8_t { UI_ACCUEIL, UI_MENU, UI_EDIT_TEMP, UI_GESTION_MOTEUR, UI_AUTOTUNE };
 ModeUI modeUI = UI_ACCUEIL;
+ModeUI modeRetourMoteur = UI_ACCUEIL;
 
 enum ItemMenu : uint8_t {
   ITEM_CHAUFFE,
@@ -656,7 +656,7 @@ void gererInterface() {
       if(b==BTN_COURT||b==BTN_LONG||d==Y_MOINS){finirAutotune(false);if(debugActif)Serial.println(F("[AUTOTUNE] Annule par utilisateur."));modeUI=UI_MENU;ecranSale=true;}
     } else if(atEcran==AT_UI_SAUVEGARDE) {
       if(d==X_PLUS||d==X_MOINS){atChoixOui=!atChoixOui;ecranSale=true;}
-      if(d==Y_MINUS||d==Y_MOINS||b==BTN_LONG)atChoixOui=false;
+      if(d==Y_MOINS||b==BTN_LONG)atChoixOui=false;
       if(d==Y_PLUS||b==BTN_COURT||d==Y_MOINS||b==BTN_LONG){
         if(atChoixOui){atEepromVerifiee=sauverPIDValeurs(atNouveauKP,atNouveauKI,atNouveauKD);if(atEepromVerifiee){KP=atNouveauKP;KI=atNouveauKI;KD=atNouveauKD;}else{KP=atAncienKP;KI=atAncienKI;KD=atAncienKD;}if(debugActif)Serial.println(atEepromVerifiee?F("[AUTOTUNE] EEPROM sauvegardee et relue OK."):F("[AUTOTUNE] ERREUR EEPROM: anciens PID conserves en RAM."));}
         else{KP=atAncienKP;KI=atAncienKI;KD=atAncienKD;atSauvegardeRefusee=true;if(debugActif)Serial.println(F("[AUTOTUNE] Sauvegarde refusee: anciens PID conserves."));}
