@@ -42,3 +42,22 @@ Le bus U8g2 est configuré à 400 kHz. La durée réelle de `sendBuffer()` est m
 ## Compilation
 
 La CI compile pour Arduino Mega 2560 (ATmega2560) avec Arduino AVR core et U8g2 2.35.30. La compilation CI ne valide pas le comportement thermique, la qualité de mesure de la thermistance, les temps I2C réels ni les mouvements mécaniques : ces points nécessitent des essais matériels prudents.
+
+
+## Thermistance T0 : table nominale 100 kOhm B3950
+
+La conversion utilise une table ADC/température avec interpolation linéaire, calculée pour une thermistance nominale 100 kOhm à 25 °C, Beta 3950 K, et la résistance pull-up RAMPS de 4,7 kOhm. Les points couvrent 0 à 300 °C par pas de 10 °C. La table est stockée en mémoire programme (PROGMEM).
+
+| Température | ADC approximatif |
+|---:|---:|
+| 20 °C | 986 |
+| 50 °C | 905 |
+| 100 °C | 611 |
+| 150 °C | 305 |
+| 200 °C | 140 |
+| 220 °C | 104 |
+| 250 °C | 68 |
+| 280 °C | 46 |
+| 290 °C | 41 |
+
+Ces valeurs sont un modèle théorique générique, pas une calibration de la sonde montée sur le hotend. La tolérance de la thermistance, du Beta réel, de la pull-up et de la référence ADC peut entraîner un écart. La table n'améliore pas magiquement la résolution ADC : autour de 250 °C, un pas ADC reste de plusieurs degrés. Avant d'utiliser le banc à haute température, comparer la mesure à une sonde de référence correctement positionnée, vérifier la température ambiante à froid et contrôler la résistance réelle de la pull-up. Ne pas relever TEMP_SECURITE_MAX pour compenser un écart. Toute protection thermique matérielle indépendante doit rester en place.
