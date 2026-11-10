@@ -296,94 +296,331 @@ void gererRampeMoteur() {
   reglerFrequenceMoteur(rpmActuel);
 }
 
-uint16_t crcPID(const uint8_t* p,size_t n) {
-  uint16_t crc=0xFFFF;
-  while(n--) { crc^=*p++; for(uint8_t j=0;j<8;j++) crc=(crc&1)?(crc>>1)^0xA001:(crc>>1); }
+uint16_t crcPID(const uint8_t* p, size_t n) {
+  uint16_t crc = 0xFFFF;
+  while (n--) {
+    crc ^= *p++;
+    for (uint8_t j = 0; j < 8; j++) {
+      crc = (crc & 1) ? (crc >> 1) ^ 0xA001 : (crc >> 1);
+    }
+  }
   return crc;
 }
-bool pidValide(float p,float i,float d) {
-  return isfinite(p)&&isfinite(i)&&isfinite(d)&&p>=1&&p<=200&&i>=0.01f&&i<=20&&d>=0&&d<=1000;
+
+bool pidValide(float p, float i, float d) {
+  return isfinite(p) && isfinite(i) && isfinite(d) &&
+         p >= 1 && p <= 200 && i >= 0.01f && i <= 20 &&
+         d >= 0 && d <= 1000;
 }
+
 void chargerPID() {
-  DonneesPID v; EEPROM.get(EEPROM_PID_ADDR,v);
-  if(v.magic==EEPROM_PID_MAGIC&&v.version==1&&
-     v.crc==crcPID((const uint8_t*)&v,offsetof(DonneesPID,crc))&&
-     pidValide(v.kp,v.ki,v.kd)) {
-    KP=v.kp; KI=v.ki; KD=v.kd;
+  DonneesPID v;
+  EEPROM.get(EEPROM_PID_ADDR, v);
+
+  bool valide = v.magic == EEPROM_PID_MAGIC && v.version == 1 &&
+      v.crc == crcPID((const uint8_t*)&v, offsetof(DonneesPID, crc)) &&
+      pidValide(v.kp, v.ki, v.kd);
+
+  if (valide) {
+    KP = v.kp;
+    KI = v.ki;
+    KD = v.kd;
   }
 }
-bool lirePIDDepuisEEPROM(float &p,float &i,float &d) {
-  DonneesPID v; EEPROM.get(EEPROM_PID_ADDR,v);
-  bool valide=v.magic==EEPROM_PID_MAGIC && v.version==1 &&
-    v.crc==crcPID((const uint8_t*)&v,offsetof(DonneesPID,crc)) && pidValide(v.kp,v.ki,v.kd);
-  if(valide) { p=v.kp; i=v.ki; d=v.kd; }
+
+bool lirePIDDepuisEEPROM(float &p, float &i, float &d) {
+  DonneesPID v;
+  EEPROM.get(EEPROM_PID_ADDR, v);
+
+  bool valide = v.magic == EEPROM_PID_MAGIC && v.version == 1 &&
+      v.crc == crcPID((const uint8_t*)&v, offsetof(DonneesPID, crc)) &&
+      pidValide(v.kp, v.ki, v.kd);
+
+  if (valide) {
+    p = v.kp;
+    i = v.ki;
+    d = v.kd;
+  }
   return valide;
 }
-bool sauverPIDValeurs(float p,float i,float d) {
-  if(!pidValide(p,i,d)) return false;
-  DonneesPID v={EEPROM_PID_MAGIC,1,{0,0,0},p,i,d,0};
-  v.crc=crcPID((const uint8_t*)&v,offsetof(DonneesPID,crc)); EEPROM.put(EEPROM_PID_ADDR,v);
-  DonneesPID controle; EEPROM.get(EEPROM_PID_ADDR,controle);
-  return controle.magic==v.magic && controle.version==v.version &&
-    controle.crc==crcPID((const uint8_t*)&controle,offsetof(DonneesPID,crc)) &&
-    pidValide(controle.kp,controle.ki,controle.kd) &&
-    controle.kp==p && controle.ki==i && controle.kd==d;
+
+bool sauverPIDValeurs(float p, float i, float d) {
+  if (!pidValide(p, i, d)) return false;
+
+  DonneesPID v = {EEPROM_PID_MAGIC, 1, {0, 0, 0}, p, i, d, 0};
+  v.crc = crcPID((const uint8_t*)&v, offsetof(DonneesPID, crc));
+  EEPROM.put(EEPROM_PID_ADDR, v);
+
+  DonneesPID controle;
+  EEPROM.get(EEPROM_PID_ADDR, controle);
+  return controle.magic == v.magic && controle.version == v.version &&
+      controle.crc == crcPID((const uint8_t*)&controle, offsetof(DonneesPID, crc)) &&
+      pidValide(controle.kp, controle.ki, controle.kd) &&
+      controle.kp == p && controle.ki == i && controle.kd == d;
 }
+
+void marquerConfigSale() {
+  configSale = true;
+  derniereModifConfig = millis();
+}
+
+void chargerConfig() {
+  DonneesConfig c;
+  EEPROM.get(EEPROM_CONFIG_ADDR, c);
+
+  bool valide = c.magic == EEPROM_CONFIG_MAGIC && c.version == 1 &&
+      c.crc == crcPID((const uint8_t*)&c, offsetof(DonneesConfig, crc)) &&
+      c.consigne >= TEMP_CONSIGNE_MIN && c.consigne <= TEMP_CONSIGNE_MAX &&
+      c.vitesse >= 5 && c.vitesse <= 100 &&
+      c.sensFwd <= 1 && c.filSurveillance <= 1;
+
+  if (valide) {
+    consigneTemp = c.consigne;
+    vitessePct = c.vitesse;
+    sensFwd = c.sensFwd != 0;
+    filSurveillance = c.filSurveillance != 0;
+  }
+}
+
+void sauverConfigSiNecessaire() {
+  if (!configSale || millis() - derniereModifConfig < 1500UL) return;
+
+  DonneesConfig c = {
+    EEPROM_CONFIG_MAGIC, 1, (int16_t)consigneTemp, vitessePct,
+    (uint8_t)(sensFwd ? 1 : 0),
+    (uint8_t)(filSurveillance ? 1 : 0), 0
+  };
+  c.crc = crcPID((const uint8_t*)&c, offsetof(DonneesConfig, crc));
+  EEPROM.put(EEPROM_CONFIG_ADDR, c);
+
+  DonneesConfig controle;
+  EEPROM.get(EEPROM_CONFIG_ADDR, controle);
+  configSale = !(controle.magic == c.magic &&
+      controle.version == c.version &&
+      controle.crc == crcPID((const uint8_t*)&controle, offsetof(DonneesConfig, crc)) &&
+      controle.consigne == c.consigne &&
+      controle.vitesse == c.vitesse &&
+      controle.sensFwd == c.sensFwd &&
+      controle.filSurveillance == c.filSurveillance);
+
+  if (debugActif) {
+    Serial.println(configSale
+      ? F("[EEPROM] Config: verification ECHEC")
+      : F("[EEPROM] Config sauvegardee/verifiee"));
+  }
+}
+
 void finirAutotune(bool ok) {
-  analogWrite(PIN_HEATER,0); pwmChauffe=0; chauffeOn=false; atChauffe=false;
-  atEepromVerifiee=false;
-  if(ok) { autotune=AT_OK; atEcran=AT_UI_SAUVEGARDE; atChoixOui=true; atSauvegardeRefusee=false; }
-  else { KP=atAncienKP; KI=atAncienKI; KD=atAncienKD; autotune=AT_ECHEC; atEcran=AT_UI_TERMINE; }
-  ecranSale=true;
+  analogWrite(PIN_HEATER, 0);
+  pwmChauffe = 0;
+  chauffeOn = false;
+  atChauffe = false;
+  atEepromVerifiee = false;
+
+  if (ok) {
+    autotune = AT_OK;
+    atEcran = AT_UI_SAUVEGARDE;
+    atChoixOui = true;
+    atSauvegardeRefusee = false;
+  } else {
+    KP = atAncienKP;
+    KI = atAncienKI;
+    KD = atAncienKD;
+    autotune = AT_ECHEC;
+    atEcran = AT_UI_TERMINE;
+  }
+  ecranSale = true;
 }
+
 bool preparerAutotune() {
-  if(!sondeValide||!temperatureInitialisee||erreurChauffe!=ERR_AUCUNE||
-     consigneTemp<TEMP_CONSIGNE_MIN||consigneTemp>TEMP_CONSIGNE_MAX||
-     temperatureC>=consigneTemp+15.0f||temperatureC>=TEMP_SECURITE_MAX-20||
-     moteurActif||moteurDemande) return false;
-  atAncienKP=KP; atAncienKI=KI; atAncienKD=KD;
-  atEepromValide=lirePIDDepuisEEPROM(atEepromKP,atEepromKI,atEepromKD);
-  atCible=(float)consigneTemp;
-  atNouveauKP=atAncienKP; atNouveauKI=atAncienKI; atNouveauKD=atAncienKD;
-  atEepromVerifiee=false; atSauvegardeRefusee=false; atChoixOui=true;
-  autotune=AT_INACTIF; atEcran=AT_UI_PREPARATION; modeUI=UI_AUTOTUNE;
-  if(debugActif) { Serial.print(F("[AUTOTUNE] PREPARATION cible="));Serial.print(atCible,1);Serial.print(F(" EEPROM="));Serial.println(atEepromValide?F("VALIDE"):F("INVALIDE/VIDE")); if(atEepromValide){Serial.print(F("[AUTOTUNE] PID EEPROM Kp="));Serial.print(atEepromKP,3);Serial.print(F(" Ki="));Serial.print(atEepromKI,3);Serial.print(F(" Kd="));Serial.println(atEepromKD,3);} }
-  ecranSale=true; return true;
-}
-bool lancerAutotune() {
-  if(!sondeValide||!temperatureInitialisee||erreurChauffe!=ERR_AUCUNE||
-     temperatureC>=atCible+15.0f||temperatureC>=TEMP_SECURITE_MAX-20||moteurActif||moteurDemande) return false;
-  chauffeOn=false; couperChauffage(); integralePID=deriveeFiltree=0;
-  atDebut=millis(); atFront=0; atCycles=0; atPeriodes=atAmplitudes=0;
-  atMin=999; atMax=-999; atPremier=true; atChauffe=true;
-  autotune=AT_EN_COURS; atEcran=AT_UI_RUN; analogWrite(PIN_HEATER,(int)AUTOTUNE_PWM);
-  if(debugActif){Serial.print(F("[AUTOTUNE] DEMARRE cible="));Serial.println(atCible,1);}
-  modeUI=UI_AUTOTUNE; ecranSale=true; return true;
-}
-void gererAutotune(float t,unsigned long now) {
-  if(autotune!=AT_EN_COURS) return;
-  if(!sondeValide||!temperatureInitialisee||erreurChauffe!=ERR_AUCUNE||
-     t>=min(235.0f,TEMP_SECURITE_MAX-20.0f)||now-atDebut>AUTOTUNE_TIMEOUT) {
-    if(debugActif) Serial.println(F("[AUTOTUNE] ABANDON securite/sonde/delai"));
-    finirAutotune(false); return;
+  if (!sondeValide || !temperatureInitialisee ||
+      erreurChauffe != ERR_AUCUNE ||
+      consigneTemp < TEMP_CONSIGNE_MIN ||
+      consigneTemp > TEMP_CONSIGNE_MAX ||
+      temperatureC >= consigneTemp + 15.0f ||
+      temperatureC >= TEMP_SECURITE_MAX - 20.0f ||
+      moteurActif || moteurDemande) {
+    return false;
   }
-  if(t<atMin) atMin=t; if(t>atMax) atMax=t;
-  bool next=atChauffe;
-  if(atChauffe&&t>=atCible+AUTOTUNE_HYST) next=false;
-  if(!atChauffe&&t<=atCible-AUTOTUNE_HYST) next=true;
-  if(next!=atChauffe) {
-    if(!next) {
-      if(!atPremier) { float per=(now-atFront)/1000.0f, amp=(atMax-atMin)*0.5f; if(per>=5&&per<=180&&amp>=0.5f&&amp<=20){atPeriodes+=per;atAmplitudes+=amp;atCycles++;} }
-      atFront=now; atPremier=false; atMin=t; atMax=t; ecranSale=true;
+
+  atAncienKP = KP;
+  atAncienKI = KI;
+  atAncienKD = KD;
+  atEepromValide = lirePIDDepuisEEPROM(atEepromKP, atEepromKI, atEepromKD);
+  atCible = (float)consigneTemp;
+  atNouveauKP = atAncienKP;
+  atNouveauKI = atAncienKI;
+  atNouveauKD = atAncienKD;
+  atEepromVerifiee = false;
+  atSauvegardeRefusee = false;
+  atChoixOui = true;
+
+  atLimiteHaute = min(atCible + 20.0f, TEMP_SECURITE_MAX - 10.0f);
+  if (atLimiteHaute <= atCible + AUTOTUNE_HYST) {
+    if (debugActif) {
+      Serial.println(F("[AUTOTUNE] Refuse: marge thermique insuffisante au-dessus de la cible."));
     }
-    atChauffe=next; analogWrite(PIN_HEATER,next?(int)AUTOTUNE_PWM:0);
+    return false;
   }
-  if(atCycles>=5) {
-    float tu=atPeriodes/atCycles, amp=atAmplitudes/atCycles;
-    if(tu<=0.0f||amp<=0.0f){finirAutotune(false);return;}
-    float ku=(4.0f*(AUTOTUNE_PWM*0.5f))/(3.14159265f*amp);
-    float p=0.60f*ku, i=1.20f*ku/tu, d=0.075f*ku*tu;
-    if(pidValide(p,i,d)){atNouveauKP=p;atNouveauKI=i;atNouveauKD=d;if(debugActif){Serial.print(F("[AUTOTUNE] CALCULE Kp="));Serial.print(p,3);Serial.print(F(" Ki="));Serial.print(i,3);Serial.print(F(" Kd="));Serial.println(d,3);}finirAutotune(true);} else finirAutotune(false);
+
+  autotune = AT_INACTIF;
+  atEcran = AT_UI_PREPARATION;
+  modeUI = UI_AUTOTUNE;
+
+  if (debugActif) {
+    Serial.print(F("[AUTOTUNE] PREPARATION cible="));
+    Serial.print(atCible, 1);
+    Serial.print(F(" limite="));
+    Serial.print(atLimiteHaute, 1);
+    Serial.print(F(" EEPROM="));
+    Serial.println(atEepromValide ? F("VALIDE") : F("INVALIDE/VIDE"));
+    if (atEepromValide) {
+      Serial.print(F("[AUTOTUNE] PID EEPROM Kp="));
+      Serial.print(atEepromKP, 3);
+      Serial.print(F(" Ki="));
+      Serial.print(atEepromKI, 3);
+      Serial.print(F(" Kd="));
+      Serial.println(atEepromKD, 3);
+    }
+  }
+
+  ecranSale = true;
+  return true;
+}
+
+bool lancerAutotune() {
+  if (!sondeValide || !temperatureInitialisee ||
+      erreurChauffe != ERR_AUCUNE ||
+      temperatureC >= atCible + 15.0f ||
+      temperatureC >= atLimiteHaute - 5.0f ||
+      moteurActif || moteurDemande) {
+    return false;
+  }
+
+  chauffeOn = false;
+  couperChauffage();
+  integralePID = 0;
+  deriveeFiltree = 0;
+
+  atDebut = millis();
+  atTestDebut = atDebut;
+  atTestTemperature = temperatureC;
+  atFront = 0;
+  atCycles = 0;
+  atPeriodes = 0;
+  atAmplitudes = 0;
+  atMin = 999;
+  atMax = -999;
+  atPremier = true;
+  atChauffe = true;
+
+  autotune = AT_EN_COURS;
+  atEcran = AT_UI_RUN;
+  analogWrite(PIN_HEATER, (int)AUTOTUNE_PWM);
+
+  if (debugActif) {
+    Serial.print(F("[AUTOTUNE] DEMARRE cible="));
+    Serial.print(atCible, 1);
+    Serial.print(F(" plafond="));
+    Serial.println(atLimiteHaute, 1);
+  }
+
+  modeUI = UI_AUTOTUNE;
+  ecranSale = true;
+  return true;
+}
+
+void gererAutotune(float t, unsigned long now) {
+  if (autotune != AT_EN_COURS) return;
+
+  if (!sondeValide || !temperatureInitialisee ||
+      erreurChauffe != ERR_AUCUNE ||
+      t >= atLimiteHaute ||
+      now - atDebut > AUTOTUNE_TIMEOUT) {
+    if (debugActif) {
+      Serial.println(F("[AUTOTUNE] ABANDON: securite, sonde, plafond ou delai."));
+    }
+    finirAutotune(false);
+    return;
+  }
+
+  // Verifier que la puissance fixe de 180/255 produit une montee mesurable.
+  if (atChauffe && now - atTestDebut >= AUTOTUNE_TEST_PWM_MS) {
+    if (t - atTestTemperature < AUTOTUNE_MONTEE_MIN_C) {
+      if (debugActif) {
+        Serial.println(F("[AUTOTUNE] PWM 180 insuffisant: montee < 2 C en 60 s."));
+      }
+      finirAutotune(false);
+      return;
+    }
+    atTestDebut = now;
+    atTestTemperature = t;
+  }
+
+  if (t < atMin) atMin = t;
+  if (t > atMax) atMax = t;
+
+  bool next = atChauffe;
+  if (atChauffe && t >= atCible + AUTOTUNE_HYST) next = false;
+  if (!atChauffe && t <= atCible - AUTOTUNE_HYST) next = true;
+
+  if (next != atChauffe) {
+    if (!next) {
+      if (!atPremier) {
+        float periode = (now - atFront) / 1000.0f;
+        float amplitude = (atMax - atMin) * 0.5f;
+        if (periode >= 5 && periode <= 180 &&
+            amplitude >= 0.5f && amplitude <= 20) {
+          atPeriodes += periode;
+          atAmplitudes += amplitude;
+          atCycles++;
+        }
+      }
+      atFront = now;
+      atPremier = false;
+      atMin = t;
+      atMax = t;
+      ecranSale = true;
+    } else {
+      // Chaque phase ON dispose de sa propre fenetre de test de puissance.
+      atTestDebut = now;
+      atTestTemperature = t;
+    }
+
+    atChauffe = next;
+    analogWrite(PIN_HEATER, next ? (int)AUTOTUNE_PWM : 0);
+  }
+
+  if (atCycles >= 5) {
+    float tu = atPeriodes / atCycles;
+    float amplitude = atAmplitudes / atCycles;
+    if (tu <= 0.0f || amplitude <= 0.0f) {
+      finirAutotune(false);
+      return;
+    }
+
+    float ku = (4.0f * (AUTOTUNE_PWM * 0.5f)) /
+               (3.14159265f * amplitude);
+    float p = 0.60f * ku;
+    float i = 1.20f * ku / tu;
+    float d = 0.075f * ku * tu;
+
+    if (pidValide(p, i, d)) {
+      atNouveauKP = p;
+      atNouveauKI = i;
+      atNouveauKD = d;
+      if (debugActif) {
+        Serial.print(F("[AUTOTUNE] CALCULE Kp="));
+        Serial.print(p, 3);
+        Serial.print(F(" Ki="));
+        Serial.print(i, 3);
+        Serial.print(F(" Kd="));
+        Serial.println(d, 3);
+      }
+      finirAutotune(true);
+    } else {
+      finirAutotune(false);
+    }
   }
 }
 
