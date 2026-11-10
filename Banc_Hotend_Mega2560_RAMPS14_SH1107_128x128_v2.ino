@@ -827,11 +827,11 @@ void dessinerAutotune() {
     if(atEepromValide){dtostrf(atEepromKP,1,1,p);dtostrf(atEepromKI,1,2,i);dtostrf(atEepromKD,1,1,d);snprintf(s,sizeof(s),"P%s I%s D%s",p,i,d);u8g2.drawUTF8(2,84,s);}else u8g2.drawUTF8(3,84,"PID actifs conserves");
     u8g2.drawUTF8(3,103,"Lancer autotune ?");
     u8g2.setFont(u8g2_font_5x8_tf);
-    u8g2.drawUTF8(8,116,atChoixOui?"> OUI":"  OUI");
-    u8g2.drawUTF8(69,116,atChoixOui?"  NON":"> NON");
+    u8g2.drawUTF8(14,116,"OUI"); u8g2.drawUTF8(75,116,"NON");
+    if(atChoixOui) dessinerFlecheDroite(5,113); else dessinerFlecheDroite(66,113);
     dessinerFlecheGauche(4,123); u8g2.drawUTF8(13,127,"Choix");
     dessinerBoutonCentral(61,123); u8g2.drawUTF8(70,127,"Valider");
-    dessinerFlecheGauche(105,123); u8g2.drawUTF8(114,127,"Retour");
+    dessinerFlecheGauche(83,123); u8g2.drawUTF8(92,127,"Retour");
   }else if(atEcran==AT_UI_RUN){
     snprintf(s,sizeof(s),"Cible: %d C",(int)atCible);u8g2.drawUTF8(3,51,s);snprintf(s,sizeof(s),"Cycles: %u/5",atCycles);u8g2.drawUTF8(3,68,s);u8g2.drawUTF8(3,91,atChauffe?"Chauffage: ON":"Chauffage: OFF");
     u8g2.setFont(u8g2_font_5x8_tf); dessinerBoutonCentral(12,119); u8g2.drawUTF8(21,123,"Annuler");
@@ -842,10 +842,11 @@ void dessinerAutotune() {
     if(atEcran==AT_UI_SAUVEGARDE){
       u8g2.drawUTF8(2,91,"Sauver nouveaux PID ?");
       u8g2.setFont(u8g2_font_5x8_tf);
-      u8g2.drawUTF8(8,107,atChoixOui?"> OUI":"  OUI");u8g2.drawUTF8(69,107,atChoixOui?"  NON":"> NON");
+      u8g2.drawUTF8(14,107,"OUI");u8g2.drawUTF8(75,107,"NON");
+      if(atChoixOui) dessinerFlecheDroite(5,104); else dessinerFlecheDroite(66,104);
       dessinerFlecheGauche(4,119);u8g2.drawUTF8(13,123,"Choix");
       dessinerBoutonCentral(61,119);u8g2.drawUTF8(70,123,"Valider");
-      dessinerFlecheGauche(105,119);u8g2.drawUTF8(114,123,"Non");
+      dessinerFlecheGauche(96,119);u8g2.drawUTF8(105,123,"Non");
     } else {
       u8g2.drawUTF8(2,94,autotune==AT_ECHEC?"Autotune en echec":(atEepromVerifiee?"EEPROM: sauvegarde OK":(atSauvegardeRefusee?"Non sauvegarde":"PID actifs inchanges")));
       u8g2.setFont(u8g2_font_5x8_tf);dessinerBoutonCentral(26,119);u8g2.drawUTF8(35,123,"Retour menu");
