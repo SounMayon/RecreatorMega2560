@@ -79,7 +79,7 @@ float KP=8.8f, KI=0.33f, KD=58.3f;
 const int EEPROM_PID_ADDR=0;
 const uint32_t EEPROM_PID_MAGIC=0x50494432UL;
 struct DonneesPID { uint32_t magic; uint8_t version; uint8_t reserved[3]; float kp,ki,kd; uint16_t crc; };
-const float AUTOTUNE_CIBLE=220.0f, AUTOTUNE_HYST=2.0f, AUTOTUNE_PWM=180.0f;
+const float AUTOTUNE_HYST=2.0f, AUTOTUNE_PWM=180.0f;
 const unsigned long AUTOTUNE_TIMEOUT=720000UL;
 enum EtatAutotune : uint8_t { AT_INACTIF, AT_EN_COURS, AT_OK, AT_ECHEC };
 EtatAutotune autotune=AT_INACTIF;
@@ -89,6 +89,12 @@ float atPeriodes=0, atAmplitudes=0, atMin=999, atMax=-999;
 float atAncienKP=22.0f, atAncienKI=1.08f, atAncienKD=114.0f;
 bool atEepromVerifiee=false;
 bool atChauffe=false, atPremier=true;
+float atCible=0.0f, atNouveauKP=0.0f, atNouveauKI=0.0f, atNouveauKD=0.0f;
+float atEepromKP=0.0f, atEepromKI=0.0f, atEepromKD=0.0f;
+bool atEepromValide=false, atChoixOui=true, atSauvegardeRefusee=false;
+enum EtatEcranAutotune : uint8_t { AT_UI_PREPARATION, AT_UI_RUN, AT_UI_SAUVEGARDE, AT_UI_TERMINE };
+EtatEcranAutotune atEcran=AT_UI_PREPARATION;
+ModeUI modeRetourMoteur=UI_ACCUEIL;
 const float BANDE_PID = 10.0f;
 const unsigned long PERIODE_RUNAWAY_MS = 40000UL;
 const float MONTEE_MIN_RUNAWAY = 2.0f;
@@ -198,7 +204,6 @@ float rpmCible() {
 bool filAutoriseMoteur() {
   return !(filSurveillance && FIL_ARRET_MOTEUR_SI_OUT && !filIn);
 }
-
 void demarrerMoteurPhysiquement() {
   if (!filAutoriseMoteur()) {
     moteurDemande = false;
@@ -307,63 +312,78 @@ void chargerPID() {
     KP=v.kp; KI=v.ki; KD=v.kd;
   }
 }
-bool sauverPID() {
-  DonneesPID v={EEPROM_PID_MAGIC,1,{0,0,0},KP,KI,KD,0};
-  v.crc=crcPID((const uint8_t*)&v,offsetof(DonneesPID,crc));
-  EEPROM.put(EEPROM_PID_ADDR,v);
+bool lirePIDDepuisEEPROM(float &p,float &i,float &d) {
+  DonneesPID v; EEPROM.get(EEPROM_PID_ADDR,v);
+  bool valide=v.magic==EEPROM_PID_MAGIC && v.version==1 &&
+    v.crc==crcPID((const uint8_t*)&v,offsetof(DonneesPID,crc)) && pidValide(v.kp,v.ki,v.kd);
+  if(valide) { p=v.kp; i=v.ki; d=v.kd; }
+  return valide;
+}
+bool sauverPIDValeurs(float p,float i,float d) {
+  if(!pidValide(p,i,d)) return false;
+  DonneesPID v={EEPROM_PID_MAGIC,1,{0,0,0},p,i,d,0};
+  v.crc=crcPID((const uint8_t*)&v,offsetof(DonneesPID,crc)); EEPROM.put(EEPROM_PID_ADDR,v);
   DonneesPID controle; EEPROM.get(EEPROM_PID_ADDR,controle);
   return controle.magic==v.magic && controle.version==v.version &&
-         controle.crc==crcPID((const uint8_t*)&controle,offsetof(DonneesPID,crc)) &&
-         pidValide(controle.kp,controle.ki,controle.kd) &&
-         controle.kp==v.kp && controle.ki==v.ki && controle.kd==v.kd;
+    controle.crc==crcPID((const uint8_t*)&controle,offsetof(DonneesPID,crc)) &&
+    pidValide(controle.kp,controle.ki,controle.kd) &&
+    controle.kp==p && controle.ki==i && controle.kd==d;
 }
 void finirAutotune(bool ok) {
   analogWrite(PIN_HEATER,0); pwmChauffe=0; chauffeOn=false; atChauffe=false;
   atEepromVerifiee=false;
-  if(ok) {
-    atEepromVerifiee=sauverPID();
-    if(!atEepromVerifiee) {
-      KP=atAncienKP; KI=atAncienKI; KD=atAncienKD;
-      ok=false;
-    }
-  }
-  autotune=ok?AT_OK:AT_ECHEC;
+  if(ok) { autotune=AT_OK; atEcran=AT_UI_SAUVEGARDE; atChoixOui=true; atSauvegardeRefusee=false; }
+  else { KP=atAncienKP; KI=atAncienKI; KD=atAncienKD; autotune=AT_ECHEC; atEcran=AT_UI_TERMINE; }
   ecranSale=true;
+}
+bool preparerAutotune() {
+  if(!sondeValide||!temperatureInitialisee||erreurChauffe!=ERR_AUCUNE||
+     consigneTemp<TEMP_CONSIGNE_MIN||consigneTemp>TEMP_CONSIGNE_MAX||
+     temperatureC>=consigneTemp+15.0f||temperatureC>=TEMP_SECURITE_MAX-20||
+     moteurActif||moteurDemande) return false;
+  atAncienKP=KP; atAncienKI=KI; atAncienKD=KD;
+  atEepromValide=lirePIDDepuisEEPROM(atEepromKP,atEepromKI,atEepromKD);
+  atCible=(float)consigneTemp;
+  atNouveauKP=atAncienKP; atNouveauKI=atAncienKI; atNouveauKD=atAncienKD;
+  atEepromVerifiee=false; atSauvegardeRefusee=false; atChoixOui=true;
+  autotune=AT_INACTIF; atEcran=AT_UI_PREPARATION; modeUI=UI_AUTOTUNE;
+  if(debugActif) { Serial.print(F("[AUTOTUNE] PREPARATION cible="));Serial.print(atCible,1);Serial.print(F(" EEPROM="));Serial.println(atEepromValide?F("VALIDE"):F("INVALIDE/VIDE")); if(atEepromValide){Serial.print(F("[AUTOTUNE] PID EEPROM Kp="));Serial.print(atEepromKP,3);Serial.print(F(" Ki="));Serial.print(atEepromKI,3);Serial.print(F(" Kd="));Serial.println(atEepromKD,3);} }
+  ecranSale=true; return true;
 }
 bool lancerAutotune() {
   if(!sondeValide||!temperatureInitialisee||erreurChauffe!=ERR_AUCUNE||
-     temperatureC>230.0f||temperatureC>=TEMP_SECURITE_MAX-20||moteurActif||moteurDemande) return false;
+     temperatureC>=atCible+15.0f||temperatureC>=TEMP_SECURITE_MAX-20||moteurActif||moteurDemande) return false;
   chauffeOn=false; couperChauffage(); integralePID=deriveeFiltree=0;
-  atAncienKP=KP; atAncienKI=KI; atAncienKD=KD;
-  atEepromVerifiee=false;
   atDebut=millis(); atFront=0; atCycles=0; atPeriodes=atAmplitudes=0;
-  atMin=999; atMax=-999; atPremier=true; atChauffe=true; autotune=AT_EN_COURS;
-  analogWrite(PIN_HEATER,(int)AUTOTUNE_PWM); modeUI=UI_AUTOTUNE; ecranSale=true;
-  return true;
+  atMin=999; atMax=-999; atPremier=true; atChauffe=true;
+  autotune=AT_EN_COURS; atEcran=AT_UI_RUN; analogWrite(PIN_HEATER,(int)AUTOTUNE_PWM);
+  if(debugActif){Serial.print(F("[AUTOTUNE] DEMARRE cible="));Serial.println(atCible,1);}
+  modeUI=UI_AUTOTUNE; ecranSale=true; return true;
 }
 void gererAutotune(float t,unsigned long now) {
   if(autotune!=AT_EN_COURS) return;
-  if(!sondeValide||erreurChauffe!=ERR_AUCUNE||t>=235.0f||t>=TEMP_SECURITE_MAX-20||now-atDebut>AUTOTUNE_TIMEOUT) { finirAutotune(false); return; }
+  if(!sondeValide||!temperatureInitialisee||erreurChauffe!=ERR_AUCUNE||
+     t>=min(235.0f,TEMP_SECURITE_MAX-20.0f)||now-atDebut>AUTOTUNE_TIMEOUT) {
+    if(debugActif) Serial.println(F("[AUTOTUNE] ABANDON securite/sonde/delai"));
+    finirAutotune(false); return;
+  }
   if(t<atMin) atMin=t; if(t>atMax) atMax=t;
   bool next=atChauffe;
-  if(atChauffe&&t>=AUTOTUNE_CIBLE+AUTOTUNE_HYST) next=false;
-  if(!atChauffe&&t<=AUTOTUNE_CIBLE-AUTOTUNE_HYST) next=true;
+  if(atChauffe&&t>=atCible+AUTOTUNE_HYST) next=false;
+  if(!atChauffe&&t<=atCible-AUTOTUNE_HYST) next=true;
   if(next!=atChauffe) {
     if(!next) {
-      if(!atPremier) {
-        float per=(now-atFront)/1000.0f, amp=(atMax-atMin)*0.5f;
-        if(per>=5&&per<=180&&amp>=0.5f&&amp<=20) { atPeriodes+=per; atAmplitudes+=amp; atCycles++; }
-      }
-      atFront=now; atPremier=false; atMin=t; atMax=t;
+      if(!atPremier) { float per=(now-atFront)/1000.0f, amp=(atMax-atMin)*0.5f; if(per>=5&&per<=180&&amp>=0.5f&&amp<=20){atPeriodes+=per;atAmplitudes+=amp;atCycles++;} }
+      atFront=now; atPremier=false; atMin=t; atMax=t; ecranSale=true;
     }
     atChauffe=next; analogWrite(PIN_HEATER,next?(int)AUTOTUNE_PWM:0);
   }
   if(atCycles>=5) {
     float tu=atPeriodes/atCycles, amp=atAmplitudes/atCycles;
+    if(tu<=0.0f||amp<=0.0f){finirAutotune(false);return;}
     float ku=(4.0f*(AUTOTUNE_PWM*0.5f))/(3.14159265f*amp);
     float p=0.60f*ku, i=1.20f*ku/tu, d=0.075f*ku*tu;
-    if(pidValide(p,i,d)) { KP=p; KI=i; KD=d; finirAutotune(true); }
-    else finirAutotune(false);
+    if(pidValide(p,i,d)){atNouveauKP=p;atNouveauKI=i;atNouveauKD=d;if(debugActif){Serial.print(F("[AUTOTUNE] CALCULE Kp="));Serial.print(p,3);Serial.print(F(" Ki="));Serial.print(i,3);Serial.print(F(" Kd="));Serial.println(d,3);}finirAutotune(true);} else finirAutotune(false);
   }
 }
 
@@ -397,8 +417,7 @@ void declencherErreurChauffe(uint8_t code) {
   if (debugActif) {
     Serial.print(F("[CHAUFFAGE] DEFAUT code="));
     Serial.println(code);
-  }
-}
+  }}
 
 void gererChauffage() {
   static unsigned long precedent = 0;
@@ -597,33 +616,20 @@ void activerChauffage() {
 }
 
 void selectionnerMenu() {
-  switch (selectionMenu) {
-    case ITEM_CHAUFFE:
-      activerChauffage();
-      break;
-    case ITEM_CONSIGNE:
-      modeUI = UI_EDIT_TEMP;
-      break;
-    case ITEM_MOTEUR:
-      modeUI = UI_GESTION_MOTEUR;
-      break;
+  switch(selectionMenu) {
+    case ITEM_CHAUFFE: activerChauffage(); break;
+    case ITEM_CONSIGNE: modeUI=UI_EDIT_TEMP; break;
+    case ITEM_MOTEUR: modeRetourMoteur=UI_MENU; modeUI=UI_GESTION_MOTEUR; break;
     case ITEM_FIL:
-      filSurveillance = !filSurveillance;
-      if (debugActif) {
-        Serial.print(F("[FIL] Surveillance "));
-        Serial.println(filSurveillance ? F("ON") : F("OFF"));
-      }
-      if (filSurveillance && !filIn && moteurActif) {
-        moteurDemande = false;
-        arretFilMemorise = true;
-        arreterMoteurPhysiquement();
-      }
+      filSurveillance=!filSurveillance;
+      if(filSurveillance&&!filIn&&moteurActif){moteurDemande=false;arretFilMemorise=true;arreterMoteurPhysiquement();}
+      if(debugActif){Serial.print(F("[FIL] Surveillance "));Serial.println(filSurveillance?F("ON"):F("OFF"));}
       break;
     case ITEM_AUTOTUNE:
-      lancerAutotune();
+      if(!preparerAutotune()&&debugActif)Serial.println(F("[AUTOTUNE] Refuse: verifier sonde, temperature, consigne et moteur arrete."));
       break;
   }
-  ecranSale = true;
+  ecranSale=true;
 }
 
 void ajusterVitesse(int variation) {
@@ -639,84 +645,46 @@ void ajusterVitesse(int variation) {
 }
 
 void gererInterface() {
-  uint8_t d = lireDirectionEvenement();
-  uint8_t b = lireEvenementBouton();
-  if (d != DIR_NONE || b != BTN_AUCUN) derniereActivite = millis();
-
+  uint8_t d=lireDirectionEvenement(), b=lireEvenementBouton();
+  if(d!=DIR_NONE||b!=BTN_AUCUN) derniereActivite=millis();
   if(modeUI==UI_AUTOTUNE) {
-    if(b==BTN_COURT||b==BTN_LONG||d==Y_MOINS) { if(autotune==AT_EN_COURS) finirAutotune(false); modeUI=UI_MENU; ecranSale=true; }
+    if(atEcran==AT_UI_PREPARATION) {
+      if(d==X_PLUS||d==X_MOINS){atChoixOui=!atChoixOui;ecranSale=true;}
+      if(d==Y_MOINS||b==BTN_LONG){modeUI=UI_MENU;ecranSale=true;return;}
+      if(d==Y_PLUS||b==BTN_COURT){if(atChoixOui){if(!lancerAutotune()){autotune=AT_ECHEC;atEcran=AT_UI_TERMINE;}}else modeUI=UI_MENU;ecranSale=true;}
+    } else if(atEcran==AT_UI_RUN) {
+      if(b==BTN_COURT||b==BTN_LONG||d==Y_MOINS){finirAutotune(false);if(debugActif)Serial.println(F("[AUTOTUNE] Annule par utilisateur."));modeUI=UI_MENU;ecranSale=true;}
+    } else if(atEcran==AT_UI_SAUVEGARDE) {
+      if(d==X_PLUS||d==X_MOINS){atChoixOui=!atChoixOui;ecranSale=true;}
+      if(d==Y_MINUS||d==Y_MOINS||b==BTN_LONG)atChoixOui=false;
+      if(d==Y_PLUS||b==BTN_COURT||d==Y_MOINS||b==BTN_LONG){
+        if(atChoixOui){atEepromVerifiee=sauverPIDValeurs(atNouveauKP,atNouveauKI,atNouveauKD);if(atEepromVerifiee){KP=atNouveauKP;KI=atNouveauKI;KD=atNouveauKD;}else{KP=atAncienKP;KI=atAncienKI;KD=atAncienKD;}if(debugActif)Serial.println(atEepromVerifiee?F("[AUTOTUNE] EEPROM sauvegardee et relue OK."):F("[AUTOTUNE] ERREUR EEPROM: anciens PID conserves en RAM."));}
+        else{KP=atAncienKP;KI=atAncienKI;KD=atAncienKD;atSauvegardeRefusee=true;if(debugActif)Serial.println(F("[AUTOTUNE] Sauvegarde refusee: anciens PID conserves."));}
+        atEcran=AT_UI_TERMINE;ecranSale=true;
+      }
+    } else if(b==BTN_COURT||b==BTN_LONG||d==Y_MOINS||d==Y_PLUS){modeUI=UI_MENU;ecranSale=true;}
     return;
   }
-  switch (modeUI) {
+  switch(modeUI){
     case UI_ACCUEIL:
-      if (d == Y_PLUS) {
-        modeUI = UI_MENU;
-        selectionMenu = 0;
-        ecranSale = true;
-      }
-      if (b == BTN_LONG) {
-        modeUI = UI_GESTION_MOTEUR;
-        ecranSale = true;
-      }
+      if(d==Y_PLUS){modeUI=UI_MENU;selectionMenu=0;ecranSale=true;}
+      if(b==BTN_LONG){modeRetourMoteur=UI_ACCUEIL;modeUI=UI_GESTION_MOTEUR;ecranSale=true;}
       break;
-
     case UI_GESTION_MOTEUR:
-      if (d == X_PLUS) ajusterVitesse(PAS_VITESSE_PCT);
-      else if (d == X_MOINS) ajusterVitesse(-PAS_VITESSE_PCT);
-      else if (d == Y_PLUS) appliquerSens(true);
-      else if (d == Y_MOINS) appliquerSens(false);
-
-      if (b == BTN_COURT) {
-        if (moteurDemande) {
-          demanderArretMoteur();
-          if (debugActif) Serial.println(F("[MOTEUR] Arret manuel."));
-        } else if (filAutoriseMoteur()) {
-          moteurDemande = true;
-          arretFilMemorise = false;
-          if (debugActif) Serial.println(F("[MOTEUR] Marche demandee."));
-        } else {
-          if (debugActif) Serial.println(F("[MOTEUR] Bloque : Fil=Out."));
-        }
-        ecranSale = true;
-      }
-      if (b == BTN_LONG) {
-        modeUI = UI_ACCUEIL;
-        ecranSale = true;
-      }
+      if(d==X_PLUS)ajusterVitesse(PAS_VITESSE_PCT);else if(d==X_MOINS)ajusterVitesse(-PAS_VITESSE_PCT);else if(d==Y_PLUS)appliquerSens(true);else if(d==Y_MOINS)appliquerSens(false);
+      if(b==BTN_COURT){if(moteurDemande)demanderArretMoteur();else if(filAutoriseMoteur()){moteurDemande=true;arretFilMemorise=false;}else if(debugActif)Serial.println(F("[MOTEUR] Bloque : Fil=Out."));ecranSale=true;}
+      if(b==BTN_LONG){modeUI=modeRetourMoteur;ecranSale=true;}
       break;
-
     case UI_MENU:
-      if (d == X_PLUS) {
-        selectionMenu = (selectionMenu + NB_ITEMS - 1) % NB_ITEMS;
-        ecranSale = true;
-      } else if (d == X_MOINS) {
-        selectionMenu = (selectionMenu + 1) % NB_ITEMS;
-        ecranSale = true;
-      }
-      if (d == Y_PLUS || b == BTN_COURT) selectionnerMenu();
-      if (d == Y_MOINS) {
-        modeUI = UI_ACCUEIL;
-        ecranSale = true;
-      }
+      if(d==X_PLUS){selectionMenu=(selectionMenu+NB_ITEMS-1)%NB_ITEMS;ecranSale=true;}else if(d==X_MOINS){selectionMenu=(selectionMenu+1)%NB_ITEMS;ecranSale=true;}
+      if(d==Y_PLUS||b==BTN_COURT)selectionnerMenu();
+      if(d==Y_MOINS){modeUI=UI_ACCUEIL;ecranSale=true;}
       break;
-
     case UI_EDIT_TEMP:
-      if (d == X_PLUS) {
-        consigneTemp = min(consigneTemp + 1, TEMP_CONSIGNE_MAX);
-        ecranSale = true;
-      } else if (d == X_MOINS) {
-        consigneTemp = max(consigneTemp - 1, TEMP_CONSIGNE_MIN);
-        ecranSale = true;
-      }
-      if (b == BTN_COURT) {
-        modeUI = UI_MENU;
-        ecranSale = true;
-      }
-      if (d == Y_MOINS) {
-        modeUI = UI_MENU;
-        ecranSale = true;
-      }
+      if(d==X_PLUS){consigneTemp=min(consigneTemp+1,TEMP_CONSIGNE_MAX);ecranSale=true;}else if(d==X_MOINS){consigneTemp=max(consigneTemp-1,TEMP_CONSIGNE_MIN);ecranSale=true;}
+      if(b==BTN_COURT||d==Y_MOINS){modeUI=UI_MENU;ecranSale=true;}
       break;
+    default:break;
   }
 }
 
@@ -797,8 +765,7 @@ void dessinerMenu() {
   char val[20];
   
   u8g2.setFont(u8g2_font_9x15_tf);
-  u8g2.drawUTF8(0, 13, " MENU GENERAL");
-  u8g2.drawHLine(0, 17, 128);
+  u8g2.drawUTF8(0, 13, " MENU GENERAL");  u8g2.drawHLine(0, 17, 128);
 
   u8g2.setFont(u8g2_font_7x14_tf);
   for (uint8_t i = 0; i < NB_ITEMS; ++i) {
@@ -809,7 +776,7 @@ void dessinerMenu() {
     }
     u8g2.drawUTF8(2, y, nomsMenu[i]);
 
-     val[0] = '\n';
+     val[0] = '\0';
     if (i == ITEM_CHAUFFE) snprintf(val, sizeof(val), "%s", chauffeOn ? "ON" : "OFF");
     if (i == ITEM_CONSIGNE) snprintf(val, sizeof(val), "%d°C", consigneTemp);
     if (i == ITEM_MOTEUR) snprintf(val, sizeof(val), "%s", moteurDemande ? "ON" : "OFF");
@@ -823,7 +790,7 @@ void dessinerMenu() {
   
   u8g2.drawHLine(0, 115, 128);
   u8g2.setFont(u8g2_font_7x13_tf);
-  u8g2.drawUTF8(0, 127, "^v:Nav O:Sel <:Esc");
+  u8g2.drawUTF8(0, 127, "X:Nav Y:Sel Y-:Retour");
 }
 
 void dessinerEditionTemp() {
@@ -851,81 +818,40 @@ void dessinerEditionTemp() {
 }
 
 void dessinerAutotune() {
-  char s[32], t[12];
-  u8g2.setFont(u8g2_font_7x14_tf);
-  u8g2.drawUTF8(0, 14, "    AUTOTUNE PID");
-  u8g2.drawHLine(0, 19, 128);
-
-  u8g2.setFont(u8g2_font_7x14_tf);
-  u8g2.drawUTF8(4, 36, "Cible : 220 C");
-  dtostrf(temperatureC, 1, 1, t);
-  snprintf(s, sizeof(s), "Mesure : %s C", (sondeValide && temperatureInitialisee) ? t : "--.-");
-  u8g2.drawUTF8(4, 52, s);
-
-  if(autotune == AT_EN_COURS) {
-    snprintf(s, sizeof(s), "Cycles : %u/5", atCycles);
-    u8g2.drawUTF8(4, 68, s);
-    u8g2.drawUTF8(4, 95, "En cours...");
-    u8g2.drawHLine(0, 115, 128);
-    
-    u8g2.drawCircle(8, 122, 3); u8g2.drawPixel(8, 122);
-    u8g2.drawUTF8(16, 126, "|< Quitter|Arreter");
-  } else {
-    u8g2.drawHLine(0, 62, 128);
-    char p[9], i[9], d[9];
-    dtostrf(atAncienKP, 1, 1, p); dtostrf(atAncienKI, 1, 2, i); dtostrf(atAncienKD, 1, 1, d);
-    snprintf(s, sizeof(s), "A P%s I%s D%s", p, i, d);
-    u8g2.drawUTF8(2, 76, s);
-    dtostrf(KP, 1, 1, p); dtostrf(KI, 1, 2, i); dtostrf(KD, 1, 1, d);
-    snprintf(s, sizeof(s), "N P%s I%s D%s", p, i, d);
-    u8g2.drawUTF8(2, 90, s);
-    if(autotune == AT_OK) u8g2.drawUTF8(4, 106, atEepromVerifiee ? "EEPROM : Save OK" : "EEPROM : Non verifiee");
-    else u8g2.drawUTF8(4, 106, "Echec : Anciens PID gardes");
-    u8g2.drawHLine(0, 115, 128);
-    
-    u8g2.drawCircle(8, 122, 3); u8g2.drawPixel(8, 122);
-    u8g2.drawUTF8(16, 126, " | <  Quitter");
+  char s[32],t[12],p[10],i[10],d[10];
+  u8g2.setFont(u8g2_font_7x14_tf);u8g2.drawUTF8(0,14,"    AUTOTUNE PID");u8g2.drawHLine(0,19,128);
+  dtostrf(temperatureC,1,1,t);snprintf(s,sizeof(s),"Mesure:%s C",(sondeValide&&temperatureInitialisee)?t:"--.-");u8g2.drawUTF8(3,35,s);
+  if(atEcran==AT_UI_PREPARATION){
+    snprintf(s,sizeof(s),"Cible: %d C",(int)atCible);u8g2.drawUTF8(3,51,s);
+    u8g2.drawUTF8(3,67,atEepromValide?"PID EEPROM valide":"EEPROM vide/invalide");
+    if(atEepromValide){dtostrf(atEepromKP,1,1,p);dtostrf(atEepromKI,1,2,i);dtostrf(atEepromKD,1,1,d);snprintf(s,sizeof(s),"P%s I%s D%s",p,i,d);u8g2.drawUTF8(2,84,s);}else u8g2.drawUTF8(3,84,"PID actifs conserves");
+    u8g2.drawUTF8(3,103,"Lancer autotune ?");u8g2.drawUTF8(3,119,atChoixOui?"> OUI     NON":"  OUI   > NON");u8g2.drawUTF8(3,127,"X:Choix Y+:Val Y-:Retour");
+  }else if(atEcran==AT_UI_RUN){
+    snprintf(s,sizeof(s),"Cible: %d C",(int)atCible);u8g2.drawUTF8(3,51,s);snprintf(s,sizeof(s),"Cycles: %u/5",atCycles);u8g2.drawUTF8(3,68,s);u8g2.drawUTF8(3,91,atChauffe?"Chauffage: ON":"Chauffage: OFF");u8g2.drawUTF8(3,115,"Bouton ou Y-: Annuler");
+  }else{
+    dtostrf(atAncienKP,1,1,p);dtostrf(atAncienKI,1,2,i);dtostrf(atAncienKD,1,1,d);snprintf(s,sizeof(s),"A P%s I%s D%s",p,i,d);u8g2.drawUTF8(2,53,s);
+    dtostrf(atNouveauKP,1,1,p);dtostrf(atNouveauKI,1,2,i);dtostrf(atNouveauKD,1,1,d);snprintf(s,sizeof(s),"N P%s I%s D%s",p,i,d);u8g2.drawUTF8(2,69,s);
+    if(atEcran==AT_UI_SAUVEGARDE){u8g2.drawUTF8(2,91,"Sauver nouveaux PID ?");u8g2.drawUTF8(3,110,atChoixOui?"> OUI     NON":"  OUI   > NON");u8g2.drawUTF8(2,127,"X:Choix Y+:Val Y-:Non");}
+    else{u8g2.drawUTF8(2,94,autotune==AT_ECHEC?"Autotune en echec":(atEepromVerifiee?"EEPROM: sauvegarde OK":(atSauvegardeRefusee?"Non sauvegarde":"PID actifs inchanges")));u8g2.drawUTF8(3,125,"Bouton: Retour menu");}
   }
 }
 
-void dessinerGestionMoteur() {
-  char val[20];
-  u8g2.setFont(u8g2_font_7x14_tf);
-  u8g2.drawUTF8(0, 14, "   GESTION MOTEUR");
-  u8g2.drawHLine(0, 19, 128);
-
-  u8g2.setFont(u8g2_font_7x14_tf);
-  u8g2.drawUTF8(4, 35, "Etat :");
-  u8g2.drawUTF8(55, 35, moteurDemande ? "ON" : "OFF");
-
-  u8g2.drawUTF8(4, 51, "Sens :");
-  u8g2.drawUTF8(55, 51, sensFwd ? "FWD" : "REV");
-  if (sensFwd) {
-    u8g2.drawTriangle(85, 45, 85, 53, 90, 49);
-  } else {
-    u8g2.drawTriangle(90, 45, 90, 53, 85, 49);
-  }
-
-  u8g2.drawUTF8(4, 67, "Vm :");
-  snprintf(val, sizeof(val), "%u %%", vitessePct);
-  u8g2.drawUTF8(55, 67, val);
-
-  u8g2.drawUTF8(4, 83, "RPM max:");
-  snprintf(val, sizeof(val), "%utr/min", MAX_RPM_MOTEUR);
-  u8g2.drawUTF8(65, 83, val);
-
-  if (filSurveillance && !filIn) {
-    u8g2.drawUTF8(6, 99, "FIL OUT : BLOQUE");
-  } else if (arretFilMemorise) {
-    u8g2.drawUTF8(6, 99, "FIL IN : DEBLOQUE");
-  }
-
-  u8g2.drawHLine(0, 105, 128);
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawUTF8(0, 116, "^|v:Vm >:FWD <:REV");
-  
-  u8g2.drawCircle(8, 124, 3); u8g2.drawPixel(8, 124);
-  u8g2.drawUTF8(16, 127, ": ON/OFF moteur");
+void dessinerFlecheHaut(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y,x-4,y+6,x+4,y+6);u8g2.drawVLine(x,y+5,6);}
+void dessinerFlecheBas(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y+6,x-4,y,x+4,y);u8g2.drawVLine(x,y,6);}
+void dessinerFlecheGauche(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y,x+6,y-4,x+6,y+4);u8g2.drawHLine(x,y,6);}
+void dessinerFlecheDroite(uint8_t x,uint8_t y){u8g2.drawTriangle(x+6,y,x,y-4,x,y+4);u8g2.drawHLine(x,y,6);}
+void dessinerBoutonCentral(uint8_t x,uint8_t y){u8g2.drawCircle(x,y,4);u8g2.drawDisc(x,y,1);}
+void dessinerGestionMoteur(){
+  char val[20];u8g2.setFont(u8g2_font_7x14_tf);u8g2.drawUTF8(0,14,"   GESTION MOTEUR");u8g2.drawHLine(0,19,128);
+  u8g2.drawUTF8(4,35,"Etat :");u8g2.drawUTF8(55,35,moteurDemande?"ON":"OFF");
+  u8g2.drawUTF8(4,51,"Sens :");u8g2.drawUTF8(55,51,sensFwd?"FWD":"REV");if(sensFwd)dessinerFlecheDroite(88,46);else dessinerFlecheGauche(88,46);
+  u8g2.drawUTF8(4,67,"Vm :");snprintf(val,sizeof(val),"%u %%",vitessePct);u8g2.drawUTF8(55,67,val);
+  u8g2.drawUTF8(4,83,"RPM max:");snprintf(val,sizeof(val),"%u tr/min",(unsigned)MAX_RPM_MOTEUR);u8g2.drawUTF8(65,83,val);
+  if(filSurveillance&&!filIn)u8g2.drawUTF8(6,99,"FIL OUT : BLOQUE");else if(arretFilMemorise)u8g2.drawUTF8(6,99,"FIL IN : DEBLOQUE");
+  u8g2.drawHLine(0,105,128);u8g2.setFont(u8g2_font_6x12_tf);
+  dessinerFlecheHaut(7,112);u8g2.drawUTF8(15,116,"Vm+");dessinerFlecheBas(51,112);u8g2.drawUTF8(59,116,"Vm-");
+  dessinerFlecheDroite(91,112);u8g2.drawUTF8(100,116,"FWD");dessinerFlecheGauche(7,124);u8g2.drawUTF8(16,128,"REV");
+  dessinerBoutonCentral(72,123);u8g2.drawUTF8(81,128,"Marche/Arret");
 }
 
 void rafraichirEcran() {
@@ -958,35 +884,19 @@ void gererDebugSerie() {
   }
 }
 
-void imprimerDebug() {
-  static unsigned long precedent = 0;
-  unsigned long maintenant = millis();
-  if (!debugActif || maintenant - precedent < PERIODE_DEBUG_MS) return;
-  precedent = maintenant;
-
-  Serial.print(F("[ETAT] T="));
-  if (sondeValide && temperatureInitialisee) Serial.print(temperatureC, 1);
-  else Serial.print(F("INVALIDE"));
-  Serial.print(F("C Tc="));
-  Serial.print(consigneTemp);
-  Serial.print(F(" Chauffe="));
-  Serial.print(chauffeOn ? F("ON") : F("OFF"));
-  Serial.print(F(" PWM="));
-  Serial.print((int)pwmChauffe);
-  Serial.print(F(" Moteur="));
-  Serial.print(moteurDemande ? F("ON") : F("OFF"));
-  Serial.print(F(" Sens="));
-  Serial.print(sensFwd ? F("FWD") : F("REV"));
-  Serial.print(F(" Vm="));
-  Serial.print(vitessePct);
-  Serial.print(F("% RPM="));
-  Serial.print(rpmActuel, 1);
-  Serial.print(F(" Fil="));
-  Serial.print(filIn ? F("In") : F("Out"));
-  Serial.print(F(" Surveillance="));
-  Serial.print(filSurveillance ? F("ON") : F("OFF"));
-  Serial.print(F(" UI="));
-  Serial.println(modeUI);
+void imprimerDebug(){
+  static unsigned long precedent=0;unsigned long maintenant=millis();if(!debugActif||maintenant-precedent<PERIODE_DEBUG_MS)return;precedent=maintenant;
+  Serial.print(F("[ETAT] T="));if(sondeValide&&temperatureInitialisee)Serial.print(temperatureC,1);else Serial.print(F("INVALIDE"));
+  Serial.print(F("C Tc="));Serial.print(consigneTemp);Serial.print(F(" Chauffe="));Serial.print(chauffeOn?F("ON"):F("OFF"));
+  Serial.print(F(" PWM="));Serial.print((int)pwmChauffe);Serial.print(F(" Moteur="));Serial.print(moteurDemande?F("ON"):F("OFF"));
+  Serial.print(F(" Sens="));Serial.print(sensFwd?F("FWD"):F("REV"));Serial.print(F(" Vm="));Serial.print(vitessePct);Serial.print(F("% RPM="));Serial.print(rpmActuel,1);
+  Serial.print(F(" Fil="));Serial.print(filIn?F("In"):F("Out"));Serial.print(F(" Surveillance="));Serial.print(filSurveillance?F("ON"):F("OFF"));
+  Serial.print(F(" UI="));Serial.print(modeUI);Serial.print(F(" AT="));Serial.print(autotune);
+  if(modeUI==UI_AUTOTUNE||autotune!=AT_INACTIF){Serial.print(F(" AT_UI="));Serial.print(atEcran);Serial.print(F(" cible="));Serial.print(atCible,1);Serial.print(F(" cycles="));Serial.print(atCycles);
+    Serial.print(F(" ancien="));Serial.print(atAncienKP,2);Serial.print(',');Serial.print(atAncienKI,3);Serial.print(',');Serial.print(atAncienKD,2);
+    Serial.print(F(" nouveau="));Serial.print(atNouveauKP,2);Serial.print(',');Serial.print(atNouveauKI,3);Serial.print(',');Serial.print(atNouveauKD,2);
+    Serial.print(F(" EEPROM="));Serial.print(atEepromVerifiee?F("VERIFIEE"):(atSauvegardeRefusee?F("REFUSEE"):F("EN_ATTENTE")));
+  }Serial.println();
 }
 
 void setup() {
@@ -997,8 +907,7 @@ void setup() {
   pinMode(PIN_DIR, OUTPUT);
   pinMode(PIN_EN, OUTPUT);
   digitalWrite(PIN_STEP, LOW);
-  digitalWrite(PIN_DIR, DIR_FWD_LEVEL);
-  digitalWrite(PIN_EN, HIGH);
+  digitalWrite(PIN_DIR, DIR_FWD_LEVEL);  digitalWrite(PIN_EN, HIGH);
 
   pinMode(PIN_FIL, INPUT_PULLUP);
   pinMode(PIN_JOY_SW, INPUT_PULLUP);
