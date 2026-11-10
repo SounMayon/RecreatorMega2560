@@ -809,7 +809,7 @@ void dessinerMenu() {
     }
     u8g2.drawUTF8(2, y, nomsMenu[i]);
 
-     val[0] = '';
+     val[0] = '\n';
     if (i == ITEM_CHAUFFE) snprintf(val, sizeof(val), "%s", chauffeOn ? "ON" : "OFF");
     if (i == ITEM_CONSIGNE) snprintf(val, sizeof(val), "%d°C", consigneTemp);
     if (i == ITEM_MOTEUR) snprintf(val, sizeof(val), "%s", moteurDemande ? "ON" : "OFF");
