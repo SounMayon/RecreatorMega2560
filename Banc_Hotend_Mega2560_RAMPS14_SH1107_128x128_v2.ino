@@ -54,26 +54,20 @@ const uint8_t PIN_JOY_Y  = A9;
 const uint8_t PIN_JOY_SW = 40;
 
 // ---------------- Reglages a valider ----------------
-// Avec INPUT_PULLUP et un switch NO entre D3 et GND : presse=LOW.
 const bool FIL_PRESSE_EST_LOW = true;
 const bool FIL_ARRET_MOTEUR_SI_OUT = true;
 
-// Sens logique : adapter si le sens mecanique FWD/REV est inverse.
 const uint8_t DIR_FWD_LEVEL = LOW;
 const uint8_t DIR_REV_LEVEL = HIGH;
 
-// Micro-pas DRV8825 : verifier que M0/M1/M2 correspondent bien a 1/32.
 const float PAS_PAR_TOUR = 200.0f * 32.0f;
 
-// Limite de depart. 100% correspond a MAX_RPM_MOTEUR.
-// Ne pas augmenter avant validation mecanique et thermique.
 const uint16_t MAX_RPM_MOTEUR = 120;
 const uint8_t VITESSE_DEPART_PCT = 50;
 const uint8_t PAS_VITESSE_PCT = 5;
 const float RPM_DEMARRAGE = 8.0f;
 const float ACCEL_RPM_PAR_SECONDE = 120.0f;
 
-// Thermistance 100k B3950 et pull-up RAMPS standard 4,7k.
 const float R_PULLUP = 4700.0f;
 const float R_THERM_25 = 100000.0f;
 const float BETA_THERM = 3950.0f;
@@ -81,8 +75,7 @@ const float TEMP_SECURITE_MAX = 290.0f;
 const int TEMP_CONSIGNE_MIN = 50;
 const int TEMP_CONSIGNE_MAX = 280;
 
-// PID de depart : valeurs a valider sur le hotend reel.
-float KP=22.0f, KI=1.08f, KD=114.0f;
+float KP=8.8f, KI=0.33f, KD=58.3f;
 const int EEPROM_PID_ADDR=0;
 const uint32_t EEPROM_PID_MAGIC=0x50494432UL;
 struct DonneesPID { uint32_t magic; uint8_t version; uint8_t reserved[3]; float kp,ki,kd; uint16_t crc; };
@@ -106,7 +99,6 @@ const unsigned long PERIODE_ECRAN_MS = 150UL;
 const unsigned long APPUI_LONG_MS = 1500UL;
 const unsigned long FIL_ANTI_REBOND_MS = 30UL;
 
-// ---------------- Etats ----------------
 enum ErreurChauffe : uint8_t { ERR_AUCUNE, ERR_SONDE, ERR_TEMP_MAX, ERR_RUNAWAY };
 enum Direction : uint8_t { DIR_NONE, X_PLUS, X_MOINS, Y_PLUS, Y_MOINS };
 enum EvenementBouton : uint8_t { BTN_AUCUN, BTN_COURT, BTN_LONG };
@@ -130,7 +122,7 @@ float rpmActuel = 0.0f;
 bool arretFilMemorise = false;
 
 bool filSurveillance = false;
-bool filIn = false; // etat filtre : presse = In ; relache = Out
+bool filIn = false;
 bool filInitialise = false;
 
 enum ModeUI : uint8_t { UI_ACCUEIL, UI_MENU, UI_EDIT_TEMP, UI_GESTION_MOTEUR, UI_AUTOTUNE };
@@ -142,11 +134,10 @@ enum ItemMenu : uint8_t {
   ITEM_MOTEUR,
   ITEM_FIL,
   ITEM_AUTOTUNE,
-  ITEM_RETOUR,
   NB_ITEMS
 };
 const char* const nomsMenu[NB_ITEMS] = {
-  "Chauffage", "Consigne T", "Gestion moteur", "Surveillance Fil", "Autotune PID", "Retour"
+  "Chauffe", "Temps C", "Moteur", "Capteur", "Autotune PID"
 };
 uint8_t selectionMenu = 0;
 
@@ -155,8 +146,6 @@ bool ecranSale = true;
 unsigned long derniereMajEcran = 0;
 unsigned long derniereActivite = 0;
 
-// ---------------- Timer4 : impulsions STEP ----------------
-// Mega 2560 : D26 = PA4. Pulse HIGH ~3 us.
 ISR(TIMER4_COMPA_vect) {
   PORTA |= _BV(PA4);
   __builtin_avr_delay_cycles(48);
@@ -166,7 +155,7 @@ ISR(TIMER4_COMPA_vect) {
 void timerMoteurDemarrer() {
   noInterrupts();
   TCCR4A = 0;
-  TCCR4B = _BV(WGM42) | _BV(CS41); // CTC, horloge 2 MHz
+  TCCR4B = _BV(WGM42) | _BV(CS41);
   TCNT4 = 0;
   TIFR4 = _BV(OCF4A);
   TIMSK4 |= _BV(OCIE4A);
@@ -240,7 +229,6 @@ void demarrerMoteurPhysiquement() {
 }
 
 void demanderArretMoteur() {
-  // Arret utilisateur avec deceleration geree par gererRampeMoteur().
   moteurDemande = false;
   ecranSale = true;
 }
@@ -249,7 +237,6 @@ void appliquerSens(bool nouveauSensFwd) {
   if (nouveauSensFwd == sensFwd) return;
 
   bool redemarrer = moteurDemande && moteurActif;
-  // Securite : arret complet avant de modifier DIR.
   arreterMoteurPhysiquement();
   sensFwd = nouveauSensFwd;
   digitalWrite(PIN_DIR, sensFwd ? DIR_FWD_LEVEL : DIR_REV_LEVEL);
@@ -261,7 +248,6 @@ void appliquerSens(bool nouveauSensFwd) {
   }
 
   if (redemarrer && filAutoriseMoteur()) {
-    // La demande reste active : redemarrage automatique dans le nouveau sens.
     demarrerMoteurPhysiquement();
   } else if (redemarrer) {
     moteurDemande = false;
@@ -304,7 +290,6 @@ void gererRampeMoteur() {
   }
   reglerFrequenceMoteur(rpmActuel);
 }
-
 
 uint16_t crcPID(const uint8_t* p,size_t n) {
   uint16_t crc=0xFFFF;
@@ -382,7 +367,6 @@ void gererAutotune(float t,unsigned long now) {
   }
 }
 
-// ---------------- Chauffage / mesure thermistance ----------------
 bool lireTemperature(float &tempC) {
   uint32_t somme = 0;
   for (uint8_t i = 0; i < 16; ++i) somme += analogRead(PIN_THERM);
@@ -390,7 +374,6 @@ bool lireTemperature(float &tempC) {
 
   if (adc < 3.0f || adc > 1020.0f) return false;
 
-  // RAMPS standard : 4,7k vers +5V, NTC vers GND.
   float resistance = R_PULLUP * adc / (1023.0f - adc);
   float invKelvin = 1.0f / 298.15f
                   + log(resistance / R_THERM_25) / BETA_THERM;
@@ -445,7 +428,6 @@ void gererChauffage() {
     temperatureC = 0.7f * temperatureC + 0.3f * mesure;
   }
 
-  // Surtemperature surveillee meme avec chauffe OFF (MOSFET potentiellement colle).
   if (mesure >= TEMP_SECURITE_MAX || temperatureC >= TEMP_SECURITE_MAX) {
     if (autotune == AT_EN_COURS) finirAutotune(false);
     if (erreurChauffe != ERR_TEMP_MAX) declencherErreurChauffe(ERR_TEMP_MAX);
@@ -506,7 +488,6 @@ void gererChauffage() {
   analogWrite(PIN_HEATER, (int)pwmChauffe);
 }
 
-// ---------------- Switch Fil NO ----------------
 void lireFil() {
   static bool niveauBrutPrecedent = HIGH;
   static bool niveauStable = HIGH;
@@ -527,8 +508,6 @@ void lireFil() {
     niveauStable = niveauBrutPrecedent;
   filIn = FIL_PRESSE_EST_LOW ? (niveauStable == LOW) : (niveauStable == HIGH);
 }
-
-// ---------------- Joystick : directions et repetiteur ----------------
 
 uint8_t lireDirectionBrute() {
   int x = analogRead(PIN_JOY_X) - 512;
@@ -555,7 +534,6 @@ uint8_t lireDirectionEvenement() {
     prochaineRepetition = maintenant + 350;
     return actuelle;
   }
-  // Les axes X se repetent pour le reglage; Haut/Bas restent ponctuels.
   if ((actuelle == X_PLUS || actuelle == X_MOINS) &&
       (long)(maintenant - prochaineRepetition) >= 0) {
     prochaineRepetition = maintenant + 130;
@@ -564,7 +542,6 @@ uint8_t lireDirectionEvenement() {
   return DIR_NONE;
 }
 
-// Evenements bouton : appui court au relachement, appui long des 1,5 s.
 uint8_t lireEvenementBouton() {
   static bool lecturePrecedente = HIGH;
   static bool etatStable = HIGH;
@@ -598,7 +575,6 @@ uint8_t lireEvenementBouton() {
   return BTN_AUCUN;
 }
 
-// ---------------- Interface / menu ----------------
 void activerChauffage() {
   if (chauffeOn) {
     chauffeOn = false;
@@ -645,9 +621,6 @@ void selectionnerMenu() {
       break;
     case ITEM_AUTOTUNE:
       lancerAutotune();
-      break;
-    case ITEM_RETOUR:
-      modeUI = UI_ACCUEIL;
       break;
   }
   ecranSale = true;
@@ -713,7 +686,6 @@ void gererInterface() {
       break;
 
     case UI_MENU:
-      // X+ = monter, X- = descendre.
       if (d == X_PLUS) {
         selectionMenu = (selectionMenu + NB_ITEMS - 1) % NB_ITEMS;
         ecranSale = true;
@@ -721,9 +693,7 @@ void gererInterface() {
         selectionMenu = (selectionMenu + 1) % NB_ITEMS;
         ecranSale = true;
       }
-      // Y+ ou bouton = selectionner.
       if (d == Y_PLUS || b == BTN_COURT) selectionnerMenu();
-      // Y- = retour direct a l'accueil.
       if (d == Y_MOINS) {
         modeUI = UI_ACCUEIL;
         ecranSale = true;
@@ -751,41 +721,31 @@ void gererInterface() {
 }
 
 // ---------------- Dessin OLED ----------------
-void dessinerFleche(int x, int y, bool droite) {
-  if (droite) {
-    u8g2.drawHLine(x, y, 12);
-    u8g2.drawLine(x + 7, y - 5, x + 12, y);
-    u8g2.drawLine(x + 7, y + 5, x + 12, y);
-  } else {
-    u8g2.drawHLine(x, y, 12);
-    u8g2.drawLine(x + 5, y - 5, x, y);
-    u8g2.drawLine(x + 5, y + 5, x, y);
-  }
-}
 
 void dessinerAccueil() {
   char ligne[24];
 
   // ==========================================
-  // LIGNE 1 : Tc (13 caractéristiques max -> police 9x15, x=0 à 117px)
+  // LIGNE 1 : Tc (13 caractères max)
   // ==========================================
-  u8g2.setFont(u8g2_font_9x15_tf); // Largeur 9px fixe, hauteur ~15px
+  u8g2.setFont(u8g2_font_9x15_tf); 
   if (erreurChauffe != ERR_AUCUNE) {
     const char* defaut = (erreurChauffe == ERR_SONDE) ? "ERR SONDE" :
                          (erreurChauffe == ERR_TEMP_MAX) ? "ERR TEMP MAX" : "ERR RUNAWAY";
     snprintf(ligne, sizeof(ligne), "%s", defaut);
   } else if (chauffeOn) {
-    snprintf(ligne, sizeof(ligne), "Tc:%3d | ON", consigneTemp);
+    snprintf(ligne, sizeof(ligne), "Tc: %3d    ON", consigneTemp);
+    u8g2.drawVLine(88, 0, 15); 
   } else {
-    snprintf(ligne, sizeof(ligne), "Tc:--- | OFF");
+    snprintf(ligne, sizeof(ligne), "Tc: ---    OFF");
+    u8g2.drawVLine(88, 0, 15); 
   }
-  u8g2.drawUTF8(0, 15, ligne); // Aligné à gauche, y=15 pour laisser de l'espace au-dessus
-
+  u8g2.drawUTF8(0, 15, ligne); 
 
   // ==========================================
-  // LIGNE 2 : Température centrale (6 caractères -> police massive)
+  // LIGNE 2 : Température centrale
   // ==========================================
-  u8g2.setFont(u8g2_font_inb24_mf); // Largeur ~20px par chiffre, hauteur 24px (très visible)
+  u8g2.setFont(u8g2_font_helvB24_tf); 
   if (sondeValide && temperatureInitialisee) {
     char t[12];
     dtostrf(temperatureC, 1, 1, t);
@@ -794,278 +754,59 @@ void dessinerAccueil() {
     snprintf(ligne, sizeof(ligne), "--.-C");
   }
   int largeur = u8g2.getUTF8Width(ligne);
-  u8g2.drawUTF8((128 - largeur) / 2, 58, ligne); // Centrage parfait au milieu de la zone
-
+  u8g2.drawUTF8((128 - largeur) / 2, 58, ligne); 
 
   // ==========================================
-  // LIGNE 3 : Moteur (16 caractères max -> police 8x13, x=0 à 128px)
+  // LIGNE 3 : Moteur
   // ==========================================
-  u8g2.setFont(u8g2_font_8x13_tf); // Largeur 8px fixe, hauteur ~13px
-  
-  // Remplissage complet de la ligne avec formatage strict à 16 caractères
+  u8g2.setFont(u8g2_font_9x15_tf); 
   if (moteurDemande || moteurActif) {
-    snprintf(ligne, sizeof(ligne), "Vm:%3u           ", vitessePct); // Les espaces comblent la ligne
+    snprintf(ligne, sizeof(ligne), "Vm: %3u           ", vitessePct); 
   } else {
-    snprintf(ligne, sizeof(ligne), "Vm:---           ");
+    snprintf(ligne, sizeof(ligne), "Vm: ---           ");
   }
-  u8g2.drawUTF8(0, 90, ligne); // Aligné au pixel 0
+  u8g2.drawUTF8(0, 90, ligne); 
 
-  // Superposition de la flèche et du statut sur la police monospacée
+  // Dessin matériel fiable des flèches en pixels (drawTriangle)
   if (moteurDemande || moteurActif) {
-    dessinerFleche(64, 85, sensFwd); // Recentré à x=64 pour un écran 128px
+    if (sensFwd) {
+      u8g2.drawTriangle(64, 82, 64, 92, 71, 87); // Flèche droite
+    } else {
+      u8g2.drawTriangle(71, 82, 71, 92, 64, 87); // Flèche gauche
+    }
   }
-  u8g2.drawVLine(88, 78, 15); // Ligne verticale séparatrice déplacée à x=88 (11 chars * 8px = 88px)
+  u8g2.drawVLine(88, 78, 15); 
   u8g2.drawUTF8(96, 90, (moteurDemande || moteurActif) ? "ON " : "OFF");
 
+  // ==========================================
+  // LIGNE 4 : Séparation complète de bout en bout
+  // ==========================================
+  u8g2.drawHLine(0, 102, 128); 
 
   // ==========================================
-  // LIGNE 4 : Séparation de bout en bout (0 à 128 px)
+  // LIGNE 5 : Fil
   // ==========================================
-  u8g2.drawHLine(0, 102, 128); // Exploite les 128 pixels de large
+  snprintf(ligne, sizeof(ligne), "Fil: %-3s         ", filIn ? "In" : "Out"); 
+  u8g2.drawUTF8(0, 122, ligne); 
 
-
-  // ==========================================
-  // LIGNE 5 : Fil (16 caractères max -> police 8x13, x=0 à 128px)
-  // ==========================================
-  // Utilisation de la même police 8x13 déjà chargée pour économiser la mémoire flash
-  snprintf(ligne, sizeof(ligne), "Fil:%-3s         ", filIn ? "In" : "Out"); // %-3s force 3 caractères de large à gauche
-  u8g2.drawUTF8(0, 122, ligne); // Aligné tout en bas (y=122, garde 6px de marge sous la police)
-
-  u8g2.drawVLine(88, 110, 15); // Aligné exactement sur la ligne verticale du dessus (x=88)
+  u8g2.drawVLine(88, 110, 15); 
   u8g2.drawUTF8(96, 122, filSurveillance ? "ON " : "OFF");
 }
 
-
 void dessinerMenu() {
   char val[20];
-  u8g2.setFont(u8g2_font_7x13B_tf);
-  u8g2.drawUTF8(3, 13, "MENU");
-  u8g2.drawHLine(0, 18, 128);
+  
+  u8g2.setFont(u8g2_font_9x15_tf);
+  u8g2.drawUTF8(0, 13, " MENU GENERAL");
+  u8g2.drawHLine(0, 17, 128);
 
-  u8g2.setFont(u8g2_font_6x12_tf);
+  u8g2.setFont(u8g2_font_7x14_tf);
   for (uint8_t i = 0; i < NB_ITEMS; ++i) {
-    int y = 32 + i * 15;
+    int y = 32 + i * 14;
     if (i == selectionMenu) {
-      u8g2.drawBox(0, y - 12, 128, 15);
+      u8g2.drawBox(0, y - 10, 128, 13);
       u8g2.setDrawColor(0);
     }
-    u8g2.drawUTF8(4, y, nomsMenu[i]);
+    u8g2.drawUTF8(2, y, nomsMenu[i]);
 
-    val[0] = '\0';
-    if (i == ITEM_CHAUFFE) snprintf(val, sizeof(val), "%s", chauffeOn ? "ON" : "OFF");
-    if (i == ITEM_CONSIGNE) snprintf(val, sizeof(val), "%dC", consigneTemp);
-    if (i == ITEM_MOTEUR) snprintf(val, sizeof(val), "%s", moteurDemande ? "ON" : "OFF");
-    if (i == ITEM_FIL) snprintf(val, sizeof(val), "%s", filSurveillance ? "ON" : "OFF");
-    if (val[0]) {
-      int w = u8g2.getUTF8Width(val);
-      u8g2.drawUTF8(124 - w, y, val);
-    }
-    u8g2.setDrawColor(1);
-  }
-  u8g2.drawHLine(0, 121, 128);
-  u8g2.setFont(u8g2_font_5x7_tf);
-  u8g2.drawUTF8(2, 127, "◄/►:haut/bas ▲:OK ▼:retour");
-}
-
-void dessinerEditionTemp() {
-  char val[16];
-  u8g2.setFont(u8g2_font_7x13B_tf);
-  u8g2.drawUTF8(2, 16, "CONSIGNE CHAUFFE");
-  u8g2.drawHLine(0, 22, 128);
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawUTF8(2, 47, "Temperature cible");
-  snprintf(val, sizeof(val), "%d C", consigneTemp);
-  u8g2.setFont(u8g2_font_helvB18_tf);
-  int w = u8g2.getUTF8Width(val);
-  u8g2.drawUTF8((128 - w) / 2, 82, val);
-  u8g2.setFont(u8g2_font_5x7_tf);
-  u8g2.drawUTF8(2, 111, "◄/► : modifier");
-  u8g2.drawUTF8(2, 125, "◉ : valider  ▼ : retour");
-}
-
-void dessinerAutotune() {
-  char s[32], t[12];
-  u8g2.setFont(u8g2_font_7x13B_tf);
-  u8g2.drawUTF8(2,14,"AUTOTUNE PID");
-  u8g2.drawHLine(0,20,128);
-
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawUTF8(2,39,"Cible: 220 C");
-  dtostrf(temperatureC,1,1,t);
-  snprintf(s,sizeof(s),"Mesure: %s C",(sondeValide&&temperatureInitialisee)?t:"--.-");
-  u8g2.drawUTF8(2,56,s);
-
-  u8g2.setFont(u8g2_font_5x7_tf);
-  if(autotune==AT_EN_COURS) {
-    snprintf(s,sizeof(s),"Cycles: %u/5",atCycles);
-    u8g2.drawUTF8(2,76,s);
-    u8g2.drawUTF8(2,96,"Autotune en cours...");
-    u8g2.drawUTF8(2,126,"◉/◄  Quitter");
-  } else {
-    u8g2.drawHLine(0,65,128);
-    char p[9],i[9],d[9];
-    dtostrf(atAncienKP,1,1,p); dtostrf(atAncienKI,1,2,i); dtostrf(atAncienKD,1,1,d);
-    snprintf(s,sizeof(s),"AV P:%s I:%s D:%s",p,i,d);
-    u8g2.drawUTF8(1,77,s);
-    dtostrf(KP,1,1,p); dtostrf(KI,1,2,i); dtostrf(KD,1,1,d);
-    snprintf(s,sizeof(s),"NV P:%s I:%s D:%s",p,i,d);
-    u8g2.drawUTF8(1,89,s);
-    if(autotune==AT_OK) u8g2.drawUTF8(1,105,atEepromVerifiee?"EEPROM: lecture OK":"EEPROM: non verifiee");
-    else u8g2.drawUTF8(1,105,"Echec: anciens PID conserves");
-    u8g2.drawUTF8(2,126,"◉/◄  Quitter");
-  }
-}
-void dessinerGestionMoteur() {
-  char val[20];
-  u8g2.setFont(u8g2_font_7x13B_tf);
-  u8g2.drawUTF8(2, 14, "GESTION MOTEUR");
-  u8g2.drawHLine(0, 20, 128);
-
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawUTF8(2, 39, "Etat:");
-  u8g2.drawUTF8(53, 39, moteurDemande ? "ON" : "OFF");
-
-  u8g2.drawUTF8(2, 58, "Sens:");
-  u8g2.drawUTF8(53, 58, sensFwd ? "FWD  ->" : "REV  <-");
-
-  u8g2.drawUTF8(2, 77, "Vitesse:");
-  snprintf(val, sizeof(val), "%u %%", vitessePct);
-  u8g2.drawUTF8(72, 77, val);
-
-  u8g2.drawUTF8(2, 96, "RPM limite:");
-  snprintf(val, sizeof(val), "%u", MAX_RPM_MOTEUR);
-  u8g2.drawUTF8(91, 96, val);
-
-  if (filSurveillance && !filIn) {
-    u8g2.drawUTF8(2, 110, "BLOQUE: FIL OUT");
-  } else if (arretFilMemorise) {
-    u8g2.drawUTF8(2, 110, "Fil libere: relancer");
-  }
-
-  u8g2.drawHLine(0, 115, 128);
-  u8g2.setFont(u8g2_font_5x7_tf);
-  u8g2.drawUTF8(2, 121, "◄/► : vitesse  ▲ : FWD");
-  u8g2.drawUTF8(2, 127, "▼ : REV  ◉ : ON/OFF");
-}
-
-void rafraichirEcran() {
-  unsigned long maintenant = millis();
-  if (!ecranSale && maintenant - derniereMajEcran < PERIODE_ECRAN_MS) return;
-  derniereMajEcran = maintenant;
-  ecranSale = false;
-
-  u8g2.clearBuffer();
-  if (modeUI == UI_ACCUEIL) dessinerAccueil();
-  else if (modeUI == UI_MENU) dessinerMenu();
-  else if (modeUI == UI_EDIT_TEMP) dessinerEditionTemp();
-  else if (modeUI == UI_AUTOTUNE) dessinerAutotune();
-  else dessinerGestionMoteur();
-  u8g2.sendBuffer();
-}
-
-// ---------------- Debug serie ----------------
-void gererDebugSerie() {
-  while (Serial.available()) {
-    char c = Serial.read();
-    if (c == 'D' || c == 'd') {
-      debugActif = true;
-      Serial.println(F("[DEBUG] ON"));
-    } else if (c == 'O' || c == 'o') {
-      debugActif = false;
-      Serial.println(F("[DEBUG] OFF"));
-    } else if (c == '?') {
-      Serial.println(F("D=debug ON, O=debug OFF, ?=aide"));
-    }
-  }
-}
-
-void imprimerDebug() {
-  static unsigned long precedent = 0;
-  unsigned long maintenant = millis();
-  if (!debugActif || maintenant - precedent < PERIODE_DEBUG_MS) return;
-  precedent = maintenant;
-
-  Serial.print(F("[ETAT] T="));
-  if (sondeValide && temperatureInitialisee) Serial.print(temperatureC, 1);
-  else Serial.print(F("INVALIDE"));
-  Serial.print(F("C Tc="));
-  Serial.print(consigneTemp);
-  Serial.print(F(" Chauffe="));
-  Serial.print(chauffeOn ? F("ON") : F("OFF"));
-  Serial.print(F(" PWM="));
-  Serial.print((int)pwmChauffe);
-  Serial.print(F(" Moteur="));
-  Serial.print(moteurDemande ? F("ON") : F("OFF"));
-  Serial.print(F(" Sens="));
-  Serial.print(sensFwd ? F("FWD") : F("REV"));
-  Serial.print(F(" Vm="));
-  Serial.print(vitessePct);
-  Serial.print(F("% RPM="));
-  Serial.print(rpmActuel, 1);
-  Serial.print(F(" Fil="));
-  Serial.print(filIn ? F("In") : F("Out"));
-  Serial.print(F(" Surveillance="));
-  Serial.print(filSurveillance ? F("ON") : F("OFF"));
-  Serial.print(F(" UI="));
-  Serial.println(modeUI);
-}
-
-// ---------------- Setup / loop ----------------
-void setup() {
-  // Mise en securite des sorties avant initialisation.
-  pinMode(PIN_HEATER, OUTPUT);
-  digitalWrite(PIN_HEATER, LOW);
-
-  pinMode(PIN_STEP, OUTPUT);
-  pinMode(PIN_DIR, OUTPUT);
-  pinMode(PIN_EN, OUTPUT);
-  digitalWrite(PIN_STEP, LOW);
-  digitalWrite(PIN_DIR, DIR_FWD_LEVEL);
-  digitalWrite(PIN_EN, HIGH);
-
-  pinMode(PIN_FIL, INPUT_PULLUP);
-  pinMode(PIN_JOY_SW, INPUT_PULLUP);
-
-  Serial.begin(115200);
-
-  chargerPID();
-  Wire.begin();
-  Wire.setClock(100000);
-  u8g2.begin();
-  u8g2.setContrast(32);
-
-  sensFwd = true;
-  filIn = false;
-  derniereActivite = millis();
-  ecranSale = true;
-
-  if (debugActif) {
-    Serial.println();
-    Serial.println(F("=== BANC HOTEND / MOTEUR - SH1107 128x128 ==="));
-    Serial.println(F("Fil NO : presse=In, relache=Out."));
-    Serial.println(F("Gestion moteur : clic marche/arret, appui long sortie."));
-    Serial.println(F("D=debug ON, O=debug OFF, ?=aide"));
-  }
-}
-
-void loop() {
-  gererDebugSerie();
-  lireFil();
-
-  // Si Fil surveillance est ON et que le contact est relache (Out),
-  // l'arret moteur est prioritaire et memorise.
-  if (filSurveillance && FIL_ARRET_MOTEUR_SI_OUT && !filIn &&
-      (moteurDemande || moteurActif)) {
-    moteurDemande = false;
-    arretFilMemorise = true;
-    arreterMoteurPhysiquement();
-    if (debugActif) Serial.println(F("[FIL] Out : moteur coupe."));
-    ecranSale = true;
-  }
-
-  gererChauffage();
-  gererRampeMoteur();
-  gererInterface();
-  rafraichirEcran();
-  imprimerDebug();
-}
+    val[0] = '
