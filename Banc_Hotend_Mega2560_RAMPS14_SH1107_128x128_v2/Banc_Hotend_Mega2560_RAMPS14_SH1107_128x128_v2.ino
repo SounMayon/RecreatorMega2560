@@ -35,6 +35,7 @@
 #include <Wire.h>
 #include <U8g2lib.h>
 #include <math.h>
+#include <avr/pgmspace.h>
 #include <stdio.h>
 #include <stddef.h>
 #include <EEPROM.h>
@@ -71,6 +72,40 @@ const float ACCEL_RPM_PAR_SECONDE = 120.0f;
 const float R_PULLUP = 4700.0f;
 const float R_THERM_25 = 100000.0f;
 const float BETA_THERM = 3950.0f;
+
+struct PointThermistance { uint16_t adc; int16_t tempC; };
+// Table nominale : 100 kOhm B3950, pull-up 4.7 kOhm, ADC 10 bits.
+// Points tous les 10 C avec interpolation lineaire. Non calibree individuellement.
+const PointThermistance TABLE_THERMISTANCE[] PROGMEM = {
+  {1009,0},{1000,10},{986,20},{966,30},{940,40},
+  {905,50},{860,60},{807,70},{747,80},{680,90},
+  {611,100},{542,110},{475,120},{412,130},{355,140},
+  {305,150},{261,160},{223,170},{191,180},{163,190},
+  {140,200},{120,210},{104,220},{90,230},{78,240},
+  {68,250},{60,260},{52,270},{46,280},{41,290},{36,300}
+};
+const uint8_t NB_POINTS_THERMISTANCE =
+    sizeof(TABLE_THERMISTANCE) / sizeof(TABLE_THERMISTANCE[0]);
+
+bool convertirADCEnTemperature(float adc, float &tempC) {
+  const uint16_t adcFroid = pgm_read_word(&TABLE_THERMISTANCE[0].adc);
+  const uint16_t adcChaud = pgm_read_word(&TABLE_THERMISTANCE[NB_POINTS_THERMISTANCE - 1].adc);
+  if (!isfinite(adc) || adc > adcFroid || adc < adcChaud) return false;
+
+  for (uint8_t n = 0; n < NB_POINTS_THERMISTANCE - 1; ++n) {
+    const uint16_t adcHaut = pgm_read_word(&TABLE_THERMISTANCE[n].adc);
+    const uint16_t adcBas = pgm_read_word(&TABLE_THERMISTANCE[n + 1].adc);
+    if (adc <= adcHaut && adc >= adcBas) {
+      const int16_t tempBasse = (int16_t)pgm_read_word(&TABLE_THERMISTANCE[n].tempC);
+      const int16_t tempHaute = (int16_t)pgm_read_word(&TABLE_THERMISTANCE[n + 1].tempC);
+      const float fraction = (adcHaut - adc) / (float)(adcHaut - adcBas);
+      tempC = tempBasse + fraction * (tempHaute - tempBasse);
+      return isfinite(tempC);
+    }
+  }
+  return false;
+}
+
 const float TEMP_SECURITE_MAX = 290.0f;
 const int TEMP_CONSIGNE_MIN = 50;
 const int TEMP_CONSIGNE_MAX = 280;
@@ -647,16 +682,11 @@ void gererAutotune(float t, unsigned long now) {
 
 bool lireTemperature(float &tempC) {
   uint32_t somme = 0;
-  for (uint8_t i = 0; i < 16; ++i) somme += analogRead(PIN_THERM);
-  float adc = somme / 16.0f;
-
-  if (adc < 3.0f || adc > 1020.0f) return false;
-
-  float resistance = R_PULLUP * adc / (1023.0f - adc);
-  float invKelvin = 1.0f / 298.15f
-                  + log(resistance / R_THERM_25) / BETA_THERM;
-  tempC = (1.0f / invKelvin) - 273.15f;
-  return isfinite(tempC) && tempC > -30.0f && tempC < 400.0f;
+  for (uint8_t i = 0; i < 16; ++i) {
+    somme += analogRead(PIN_THERM);
+  }
+  const float adc = somme / 16.0f;
+  return convertirADCEnTemperature(adc, tempC);
 }
 
 void couperChauffage() {
