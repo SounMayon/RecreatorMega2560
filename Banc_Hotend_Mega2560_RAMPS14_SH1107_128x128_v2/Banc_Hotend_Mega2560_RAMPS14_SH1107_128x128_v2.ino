@@ -227,6 +227,7 @@ bool filAutoriseMoteur() {
 void demarrerMoteurPhysiquement() {
   if (!filAutoriseMoteur()) {
     moteurDemande = false;
+    changementSensEnAttente = false;
     arretFilMemorise = true;
     if (debugActif) Serial.println(F("[FIL] Demarrage refuse : Fil=Out."));
     ecranSale = true;
@@ -286,6 +287,7 @@ void gererRampeMoteur() {
 
   if (!filAutoriseMoteur()) {
     moteurDemande = false;
+    changementSensEnAttente = false;
     arretFilMemorise = true;
     arreterMoteurPhysiquement();
     if (debugActif) Serial.println(F("[FIL] Fil=Out : arret moteur."));
@@ -892,7 +894,7 @@ void selectionnerMenu() {
     case ITEM_FIL:
       filSurveillance=!filSurveillance;
       marquerConfigSale();
-      if(filSurveillance&&!filIn&&moteurActif){moteurDemande=false;arretFilMemorise=true;arreterMoteurPhysiquement();}
+      if(filSurveillance&&!filIn&&moteurActif){moteurDemande=false;changementSensEnAttente=false;arretFilMemorise=true;arreterMoteurPhysiquement();}
       if(debugActif){Serial.print(F("[FIL] Surveillance "));Serial.println(filSurveillance?F("ON"):F("OFF"));}
       break;
     case ITEM_AUTOTUNE:
