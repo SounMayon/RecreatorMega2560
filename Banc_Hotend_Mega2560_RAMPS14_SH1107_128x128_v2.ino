@@ -728,18 +728,16 @@ void dessinerAccueil() {
   // LIGNE 3 : Moteur
   // ==========================================
   u8g2.setFont(u8g2_font_9x15_tf); 
-  if (moteurDemande || moteurActif) {
-    snprintf(ligne, sizeof(ligne), "Vm: %3u           ", vitessePct); 
-  } else {
-    snprintf(ligne, sizeof(ligne), "Vm: ---           ");
-  }
-  u8g2.drawUTF8(0, 90, ligne); 
+  if (moteurDemande || moteurActif) snprintf(ligne, sizeof(ligne), "Vm: %3u", vitessePct);
+  else snprintf(ligne, sizeof(ligne), "Vm: ---");
+  u8g2.drawUTF8(0, 90, ligne);
 
-  // Dessin matériel fiable des flèches en pixels (drawTriangle)
+  // Fleche placee juste apres la valeur Vm.
   if (moteurDemande || moteurActif) {
-    // Centre la fleche dans l'espace libre entre la valeur Vm et le separateur.
-    if (sensFwd) u8g2.drawTriangle(79, 82, 79, 92, 86, 87);
-    else         u8g2.drawTriangle(86, 82, 86, 92, 79, 87);
+    int xFleche = u8g2.getUTF8Width(ligne) + 2;
+    if (xFleche > 78) xFleche = 78;
+    if (sensFwd) u8g2.drawTriangle(xFleche, 82, xFleche, 92, xFleche + 6, 87);
+    else         u8g2.drawTriangle(xFleche + 6, 82, xFleche + 6, 92, xFleche, 87);
   }
   u8g2.drawVLine(88, 78, 15); 
   u8g2.drawUTF8(96, 90, (moteurDemande || moteurActif) ? "ON " : "OFF");
@@ -811,8 +809,8 @@ void dessinerEditionTemp() {
   u8g2.drawHLine(0, 95, 128);
   u8g2.setFont(u8g2_font_5x8_tf);
   // X- diminue, X+ augmente ; bouton central valide ; Y- revient au menu.
-  dessinerFlecheGauche(5,106); u8g2.drawUTF8(14,110,"Dim");
-  dessinerFlecheDroite(42,106); u8g2.drawUTF8(51,110,"Aug");
+  dessinerFlecheBas(5,106); u8g2.drawUTF8(14,110,"Dim");
+  dessinerFlecheHaut(42,106); u8g2.drawUTF8(51,110,"Aug");
   dessinerBoutonCentral(84,106); u8g2.drawUTF8(93,110,"Valider");
   dessinerFlecheGauche(23,121); u8g2.drawUTF8(32,127,"Retour menu");
 }
@@ -828,7 +826,7 @@ void dessinerAutotune() {
     u8g2.drawUTF8(3,103,"Lancer autotune ?");
     u8g2.setFont(u8g2_font_5x8_tf);
     u8g2.drawUTF8(14,116,"OUI"); u8g2.drawUTF8(75,116,"NON");
-    if(atChoixOui) dessinerFlecheDroite(5,113); else dessinerFlecheDroite(66,113);
+    if(atChoixOui) dessinerFlecheHaut(5,111); else dessinerFlecheBas(66,111);
     dessinerFlecheGauche(4,123); u8g2.drawUTF8(13,127,"Choix");
     dessinerBoutonCentral(61,123); u8g2.drawUTF8(70,127,"Valider");
     dessinerFlecheGauche(83,123); u8g2.drawUTF8(92,127,"Retour");
@@ -843,7 +841,7 @@ void dessinerAutotune() {
       u8g2.drawUTF8(2,91,"Sauver nouveaux PID ?");
       u8g2.setFont(u8g2_font_5x8_tf);
       u8g2.drawUTF8(14,107,"OUI");u8g2.drawUTF8(75,107,"NON");
-      if(atChoixOui) dessinerFlecheDroite(5,104); else dessinerFlecheDroite(66,104);
+      if(atChoixOui) dessinerFlecheHaut(5,102); else dessinerFlecheBas(66,102);
       dessinerFlecheGauche(4,119);u8g2.drawUTF8(13,123,"Choix");
       dessinerBoutonCentral(61,119);u8g2.drawUTF8(70,123,"Valider");
       dessinerFlecheGauche(96,119);u8g2.drawUTF8(105,123,"Non");
@@ -854,7 +852,7 @@ void dessinerAutotune() {
   }
 }
 
-void dessinerFlecheHaut(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y,x-3,y+5,x+3,y+5);u8g2.drawVLine(x,y+4,5);}
+void dessinerFlecheHaut(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y,x-3,y+5,x+3,y+5);}
 void dessinerFlecheBas(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y+5,x-3,y,x+3,y);u8g2.drawVLine(x,y,5);}
 void dessinerFlecheGauche(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y,x+5,y-3,x+5,y+3);u8g2.drawHLine(x,y,5);}
 void dessinerFlecheDroite(uint8_t x,uint8_t y){u8g2.drawTriangle(x+5,y,x,y-3,x,y+3);u8g2.drawHLine(x,y,5);}
@@ -868,8 +866,8 @@ void dessinerGestionMoteur(){
   if(filSurveillance&&!filIn)u8g2.drawUTF8(6,99,"FIL OUT : BLOQUE");else if(arretFilMemorise)u8g2.drawUTF8(6,99,"FIL IN : DEBLOQUE");
   u8g2.drawHLine(0,105,128);u8g2.setFont(u8g2_font_5x8_tf);
   dessinerFlecheHaut(5,112);u8g2.drawUTF8(12,116,"Vm+");dessinerFlecheBas(34,112);u8g2.drawUTF8(41,116,"Vm-");
-  dessinerFlecheDroite(68,112);u8g2.drawUTF8(75,116,"FWD");dessinerFlecheGauche(5,124);u8g2.drawUTF8(12,127,"REV");
-  dessinerBoutonCentral(49,124);u8g2.drawUTF8(57,127,"Marche/Arret");
+  dessinerFlecheDroite(68,112);u8g2.drawUTF8(73,116,"FWD");dessinerFlecheGauche(5,124);u8g2.drawUTF8(10,127,"REV");
+  dessinerBoutonCentral(49,124);u8g2.drawUTF8(55,127,"Marche/Arret");
 }
 
 void rafraichirEcran() {
