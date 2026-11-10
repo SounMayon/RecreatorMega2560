@@ -737,11 +737,9 @@ void dessinerAccueil() {
 
   // Dessin matériel fiable des flèches en pixels (drawTriangle)
   if (moteurDemande || moteurActif) {
-    if (sensFwd) {
-      u8g2.drawTriangle(64, 82, 64, 92, 71, 87); // Flèche droite
-    } else {
-      u8g2.drawTriangle(71, 82, 71, 92, 64, 87); // Flèche gauche
-    }
+    // Centre la fleche dans l'espace libre entre la valeur Vm et le separateur.
+    if (sensFwd) u8g2.drawTriangle(79, 82, 79, 92, 86, 87);
+    else         u8g2.drawTriangle(86, 82, 86, 92, 79, 87);
   }
   u8g2.drawVLine(88, 78, 15); 
   u8g2.drawUTF8(96, 90, (moteurDemande || moteurActif) ? "ON " : "OFF");
@@ -789,8 +787,11 @@ void dessinerMenu() {
   }
   
   u8g2.drawHLine(0, 115, 128);
-  u8g2.setFont(u8g2_font_7x13_tf);
-  u8g2.drawUTF8(0, 127, "X:Nav Y:Sel Y-:Retour");
+  u8g2.setFont(u8g2_font_5x8_tf);
+  dessinerFlecheHaut(4,120); dessinerFlecheBas(12,120);
+  u8g2.drawUTF8(19,127,"Nav");
+  dessinerFlecheDroite(48,123); u8g2.drawUTF8(57,127,"Sel");
+  dessinerFlecheGauche(81,123); u8g2.drawUTF8(90,127,"Retour");
 }
 
 void dessinerEditionTemp() {
@@ -808,13 +809,12 @@ void dessinerEditionTemp() {
   u8g2.drawUTF8((128 - w) / 2, 75, val);
   
   u8g2.drawHLine(0, 95, 128);
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawUTF8(4, 110, "v|^: Dec | Inc");
-  
-  // Dessin d'un point de validation matériel (cercle concentrique en pixels)
-  u8g2.drawCircle(8, 121, 3);
-  u8g2.drawPixel(8, 121);
-  u8g2.drawUTF8(16, 124, ": Conf <: Esc");
+  u8g2.setFont(u8g2_font_5x8_tf);
+  // X- diminue, X+ augmente ; bouton central valide ; Y- revient au menu.
+  dessinerFlecheGauche(5,106); u8g2.drawUTF8(14,110,"Dim");
+  dessinerFlecheDroite(42,106); u8g2.drawUTF8(51,110,"Aug");
+  dessinerBoutonCentral(84,106); u8g2.drawUTF8(93,110,"Valider");
+  dessinerFlecheGauche(23,121); u8g2.drawUTF8(32,127,"Retour menu");
 }
 
 void dessinerAutotune() {
@@ -825,22 +825,39 @@ void dessinerAutotune() {
     snprintf(s,sizeof(s),"Cible: %d C",(int)atCible);u8g2.drawUTF8(3,51,s);
     u8g2.drawUTF8(3,67,atEepromValide?"PID EEPROM valide":"EEPROM vide/invalide");
     if(atEepromValide){dtostrf(atEepromKP,1,1,p);dtostrf(atEepromKI,1,2,i);dtostrf(atEepromKD,1,1,d);snprintf(s,sizeof(s),"P%s I%s D%s",p,i,d);u8g2.drawUTF8(2,84,s);}else u8g2.drawUTF8(3,84,"PID actifs conserves");
-    u8g2.drawUTF8(3,103,"Lancer autotune ?");u8g2.drawUTF8(3,119,atChoixOui?"> OUI     NON":"  OUI   > NON");u8g2.drawUTF8(3,127,"X:Choix Y+:Val Y-:Retour");
+    u8g2.drawUTF8(3,103,"Lancer autotune ?");
+    u8g2.setFont(u8g2_font_5x8_tf);
+    u8g2.drawUTF8(8,116,atChoixOui?"> OUI":"  OUI");
+    u8g2.drawUTF8(69,116,atChoixOui?"  NON":"> NON");
+    dessinerFlecheGauche(4,123); u8g2.drawUTF8(13,127,"Choix");
+    dessinerBoutonCentral(61,123); u8g2.drawUTF8(70,127,"Valider");
+    dessinerFlecheGauche(105,123); u8g2.drawUTF8(114,127,"Retour");
   }else if(atEcran==AT_UI_RUN){
-    snprintf(s,sizeof(s),"Cible: %d C",(int)atCible);u8g2.drawUTF8(3,51,s);snprintf(s,sizeof(s),"Cycles: %u/5",atCycles);u8g2.drawUTF8(3,68,s);u8g2.drawUTF8(3,91,atChauffe?"Chauffage: ON":"Chauffage: OFF");u8g2.drawUTF8(3,115,"Bouton ou Y-: Annuler");
+    snprintf(s,sizeof(s),"Cible: %d C",(int)atCible);u8g2.drawUTF8(3,51,s);snprintf(s,sizeof(s),"Cycles: %u/5",atCycles);u8g2.drawUTF8(3,68,s);u8g2.drawUTF8(3,91,atChauffe?"Chauffage: ON":"Chauffage: OFF");
+    u8g2.setFont(u8g2_font_5x8_tf); dessinerBoutonCentral(12,119); u8g2.drawUTF8(21,123,"Annuler");
+    dessinerFlecheGauche(79,119); u8g2.drawUTF8(88,123,"Retour");
   }else{
     dtostrf(atAncienKP,1,1,p);dtostrf(atAncienKI,1,2,i);dtostrf(atAncienKD,1,1,d);snprintf(s,sizeof(s),"A P%s I%s D%s",p,i,d);u8g2.drawUTF8(2,53,s);
     dtostrf(atNouveauKP,1,1,p);dtostrf(atNouveauKI,1,2,i);dtostrf(atNouveauKD,1,1,d);snprintf(s,sizeof(s),"N P%s I%s D%s",p,i,d);u8g2.drawUTF8(2,69,s);
-    if(atEcran==AT_UI_SAUVEGARDE){u8g2.drawUTF8(2,91,"Sauver nouveaux PID ?");u8g2.drawUTF8(3,110,atChoixOui?"> OUI     NON":"  OUI   > NON");u8g2.drawUTF8(2,127,"X:Choix Y+:Val Y-:Non");}
-    else{u8g2.drawUTF8(2,94,autotune==AT_ECHEC?"Autotune en echec":(atEepromVerifiee?"EEPROM: sauvegarde OK":(atSauvegardeRefusee?"Non sauvegarde":"PID actifs inchanges")));u8g2.drawUTF8(3,125,"Bouton: Retour menu");}
+    if(atEcran==AT_UI_SAUVEGARDE){
+      u8g2.drawUTF8(2,91,"Sauver nouveaux PID ?");
+      u8g2.setFont(u8g2_font_5x8_tf);
+      u8g2.drawUTF8(8,107,atChoixOui?"> OUI":"  OUI");u8g2.drawUTF8(69,107,atChoixOui?"  NON":"> NON");
+      dessinerFlecheGauche(4,119);u8g2.drawUTF8(13,123,"Choix");
+      dessinerBoutonCentral(61,119);u8g2.drawUTF8(70,123,"Valider");
+      dessinerFlecheGauche(105,119);u8g2.drawUTF8(114,123,"Non");
+    } else {
+      u8g2.drawUTF8(2,94,autotune==AT_ECHEC?"Autotune en echec":(atEepromVerifiee?"EEPROM: sauvegarde OK":(atSauvegardeRefusee?"Non sauvegarde":"PID actifs inchanges")));
+      u8g2.setFont(u8g2_font_5x8_tf);dessinerBoutonCentral(26,119);u8g2.drawUTF8(35,123,"Retour menu");
+    }
   }
 }
 
-void dessinerFlecheHaut(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y,x-4,y+6,x+4,y+6);u8g2.drawVLine(x,y+5,6);}
-void dessinerFlecheBas(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y+6,x-4,y,x+4,y);u8g2.drawVLine(x,y,6);}
-void dessinerFlecheGauche(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y,x+6,y-4,x+6,y+4);u8g2.drawHLine(x,y,6);}
-void dessinerFlecheDroite(uint8_t x,uint8_t y){u8g2.drawTriangle(x+6,y,x,y-4,x,y+4);u8g2.drawHLine(x,y,6);}
-void dessinerBoutonCentral(uint8_t x,uint8_t y){u8g2.drawCircle(x,y,4);u8g2.drawDisc(x,y,1);}
+void dessinerFlecheHaut(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y,x-3,y+5,x+3,y+5);u8g2.drawVLine(x,y+4,5);}
+void dessinerFlecheBas(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y+5,x-3,y,x+3,y);u8g2.drawVLine(x,y,5);}
+void dessinerFlecheGauche(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y,x+5,y-3,x+5,y+3);u8g2.drawHLine(x,y,5);}
+void dessinerFlecheDroite(uint8_t x,uint8_t y){u8g2.drawTriangle(x+5,y,x,y-3,x,y+3);u8g2.drawHLine(x,y,5);}
+void dessinerBoutonCentral(uint8_t x,uint8_t y){u8g2.drawCircle(x,y,3);u8g2.drawDisc(x,y,1);}
 void dessinerGestionMoteur(){
   char val[20];u8g2.setFont(u8g2_font_7x14_tf);u8g2.drawUTF8(0,14,"   GESTION MOTEUR");u8g2.drawHLine(0,19,128);
   u8g2.drawUTF8(4,35,"Etat :");u8g2.drawUTF8(55,35,moteurDemande?"ON":"OFF");
@@ -848,10 +865,10 @@ void dessinerGestionMoteur(){
   u8g2.drawUTF8(4,67,"Vm :");snprintf(val,sizeof(val),"%u %%",vitessePct);u8g2.drawUTF8(55,67,val);
   u8g2.drawUTF8(4,83,"RPM max:");snprintf(val,sizeof(val),"%u tr/min",(unsigned)MAX_RPM_MOTEUR);u8g2.drawUTF8(65,83,val);
   if(filSurveillance&&!filIn)u8g2.drawUTF8(6,99,"FIL OUT : BLOQUE");else if(arretFilMemorise)u8g2.drawUTF8(6,99,"FIL IN : DEBLOQUE");
-  u8g2.drawHLine(0,105,128);u8g2.setFont(u8g2_font_6x12_tf);
-  dessinerFlecheHaut(7,112);u8g2.drawUTF8(15,116,"Vm+");dessinerFlecheBas(51,112);u8g2.drawUTF8(59,116,"Vm-");
-  dessinerFlecheDroite(91,112);u8g2.drawUTF8(100,116,"FWD");dessinerFlecheGauche(7,124);u8g2.drawUTF8(16,128,"REV");
-  dessinerBoutonCentral(72,123);u8g2.drawUTF8(81,128,"Marche/Arret");
+  u8g2.drawHLine(0,105,128);u8g2.setFont(u8g2_font_5x8_tf);
+  dessinerFlecheHaut(5,112);u8g2.drawUTF8(12,116,"Vm+");dessinerFlecheBas(34,112);u8g2.drawUTF8(41,116,"Vm-");
+  dessinerFlecheDroite(68,112);u8g2.drawUTF8(75,116,"FWD");dessinerFlecheGauche(5,124);u8g2.drawUTF8(12,127,"REV");
+  dessinerBoutonCentral(49,124);u8g2.drawUTF8(57,127,"Marche/Arret");
 }
 
 void rafraichirEcran() {
