@@ -81,6 +81,10 @@ const uint32_t EEPROM_PID_MAGIC=0x50494432UL;
 struct DonneesPID { uint32_t magic; uint8_t version; uint8_t reserved[3]; float kp,ki,kd; uint16_t crc; };
 const float AUTOTUNE_HYST=2.0f, AUTOTUNE_PWM=180.0f;
 const unsigned long AUTOTUNE_TIMEOUT=720000UL;
+const unsigned long AUTOTUNE_TEST_PWM_MS=60000UL;
+const float AUTOTUNE_MONTEE_MIN_C=2.0f;
+unsigned long atTestDebut=0;
+float atTestTemperature=0.0f;
 enum EtatAutotune : uint8_t { AT_INACTIF, AT_EN_COURS, AT_OK, AT_ECHEC };
 EtatAutotune autotune=AT_INACTIF;
 unsigned long atDebut=0, atFront=0;
@@ -92,15 +96,19 @@ bool atChauffe=false, atPremier=true;
 float atCible=0.0f, atNouveauKP=0.0f, atNouveauKI=0.0f, atNouveauKD=0.0f;
 float atEepromKP=0.0f, atEepromKI=0.0f, atEepromKD=0.0f;
 bool atEepromValide=false, atChoixOui=true, atSauvegardeRefusee=false;
+float atLimiteHaute=0.0f;
 enum EtatEcranAutotune : uint8_t { AT_UI_PREPARATION, AT_UI_RUN, AT_UI_SAUVEGARDE, AT_UI_TERMINE };
 EtatEcranAutotune atEcran=AT_UI_PREPARATION;
 const float BANDE_PID = 10.0f;
 const unsigned long PERIODE_RUNAWAY_MS = 40000UL;
 const float MONTEE_MIN_RUNAWAY = 2.0f;
+const float RUNAWAY_ECART_C = 18.0f;
+const unsigned long PERIODE_DERIVE_MS = 40000UL;
+const unsigned long VEILLE_ECRAN_MS = 60000UL;
 
 #define DEBUG_AU_DEMARRAGE 1
 const unsigned long PERIODE_DEBUG_MS = 1000UL;
-const unsigned long PERIODE_ECRAN_MS = 150UL;
+const unsigned long PERIODE_ECRAN_MS = 300UL;
 const unsigned long APPUI_LONG_MS = 1500UL;
 const unsigned long FIL_ANTI_REBOND_MS = 30UL;
 
@@ -125,6 +133,8 @@ bool sensFwd = true;
 uint8_t vitessePct = VITESSE_DEPART_PCT;
 float rpmActuel = 0.0f;
 bool arretFilMemorise = false;
+bool changementSensEnAttente = false;
+bool sensDemandeFwd = true;
 
 bool filSurveillance = false;
 bool filIn = false;
@@ -149,8 +159,18 @@ uint8_t selectionMenu = 0;
 
 bool debugActif = DEBUG_AU_DEMARRAGE;
 bool ecranSale = true;
+bool ecranEnVeille = false;
+unsigned long activiteAvantVeille = 0;
 unsigned long derniereMajEcran = 0;
 unsigned long derniereActivite = 0;
+unsigned long dureeEcranMaxUs = 0;
+unsigned long totalEcranUs = 0;
+uint16_t nbMesuresEcran = 0;
+const int EEPROM_CONFIG_ADDR = 32;
+const uint32_t EEPROM_CONFIG_MAGIC = 0x43464731UL;
+struct DonneesConfig { uint32_t magic; uint8_t version; int16_t consigne; uint8_t vitesse; uint8_t sensFwd; uint8_t filSurveillance; uint16_t crc; };
+bool configSale = false;
+unsigned long derniereModifConfig = 0;
 
 ISR(TIMER4_COMPA_vect) {
   PORTA |= _BV(PA4);
@@ -239,24 +259,14 @@ void demanderArretMoteur() {
 }
 
 void appliquerSens(bool nouveauSensFwd) {
-  if (nouveauSensFwd == sensFwd) return;
-
-  bool redemarrer = moteurDemande && moteurActif;
-  arreterMoteurPhysiquement();
-  sensFwd = nouveauSensFwd;
-  digitalWrite(PIN_DIR, sensFwd ? DIR_FWD_LEVEL : DIR_REV_LEVEL);
-  delayMicroseconds(10);
-
-  if (debugActif) {
-    Serial.print(F("[MOTEUR] Nouveau sens : "));
-    Serial.println(sensFwd ? F("FWD") : F("REV"));
-  }
-
-  if (redemarrer && filAutoriseMoteur()) {
-    demarrerMoteurPhysiquement();
-  } else if (redemarrer) {
-    moteurDemande = false;
-    arretFilMemorise = true;
+  if (nouveauSensFwd == sensFwd || changementSensEnAttente) return;
+  if (!moteurActif) {
+    sensFwd = nouveauSensFwd;
+    digitalWrite(PIN_DIR, sensFwd ? DIR_FWD_LEVEL : DIR_REV_LEVEL);
+    marquerConfigSale();
+  } else {
+    sensDemandeFwd = nouveauSensFwd;
+    changementSensEnAttente = true;
   }
   ecranSale = true;
 }
@@ -283,14 +293,23 @@ void gererRampeMoteur() {
     return;
   }
 
-  float cible = moteurDemande ? rpmCible() : 0.0f;
+  float cible = (moteurDemande && !changementSensEnAttente) ? rpmCible() : 0.0f;
   float variation = ACCEL_RPM_PAR_SECONDE * dt;
 
   if (rpmActuel < cible) rpmActuel = min(rpmActuel + variation, cible);
   else if (rpmActuel > cible) rpmActuel = max(rpmActuel - variation, cible);
 
-  if (!moteurDemande && rpmActuel <= RPM_DEMARRAGE) {
+  if ((!moteurDemande || changementSensEnAttente) && rpmActuel <= RPM_DEMARRAGE) {
     arreterMoteurPhysiquement();
+    if (changementSensEnAttente) {
+      sensFwd = sensDemandeFwd;
+      digitalWrite(PIN_DIR, sensFwd ? DIR_FWD_LEVEL : DIR_REV_LEVEL);
+      delayMicroseconds(10);
+      changementSensEnAttente = false;
+      marquerConfigSale();
+      if (moteurDemande && filAutoriseMoteur()) demarrerMoteurPhysiquement();
+      else if (!filAutoriseMoteur()) { moteurDemande = false; arretFilMemorise = true; }
+    }
     return;
   }
   reglerFrequenceMoteur(rpmActuel);
@@ -660,6 +679,8 @@ void gererChauffage() {
   static unsigned long precedent = 0;
   static unsigned long debutControleRunaway = 0;
   static float temperatureReference = 0.0f;
+  static bool regulationArmee = false;
+  static unsigned long debutDerive = 0;
 
   unsigned long maintenant = millis();
   if (maintenant - precedent < 200) return;
@@ -699,6 +720,8 @@ void gererChauffage() {
 
   if(autotune==AT_EN_COURS) { gererAutotune(mesure,maintenant); return; }
   if (!chauffeOn) {
+    regulationArmee = false;
+    debutDerive = 0;
     couperChauffage();
     integralePID = 0.0f;
     deriveeFiltree = 0.0f;
@@ -709,6 +732,15 @@ void gererChauffage() {
   }
 
   float erreur = consigneTemp - temperatureC;
+  if (temperatureC >= consigneTemp - BANDE_PID) regulationArmee = true;
+  if (regulationArmee && temperatureC < consigneTemp - RUNAWAY_ECART_C) {
+    if (debutDerive == 0) debutDerive = maintenant;
+    else if (maintenant - debutDerive >= PERIODE_DERIVE_MS) {
+      declencherErreurChauffe(ERR_RUNAWAY);
+      if (debugActif) Serial.println(F("[CHAUFFAGE] RUNAWAY: ecart durable sous consigne."));
+      return;
+    }
+  } else debutDerive = 0;
 
   if (erreur > BANDE_PID) {
     pwmChauffe = 255.0f;
@@ -859,6 +891,7 @@ void selectionnerMenu() {
     case ITEM_MOTEUR: modeRetourMoteur=UI_MENU; modeUI=UI_GESTION_MOTEUR; break;
     case ITEM_FIL:
       filSurveillance=!filSurveillance;
+      marquerConfigSale();
       if(filSurveillance&&!filIn&&moteurActif){moteurDemande=false;arretFilMemorise=true;arreterMoteurPhysiquement();}
       if(debugActif){Serial.print(F("[FIL] Surveillance "));Serial.println(filSurveillance?F("ON"):F("OFF"));}
       break;
@@ -873,6 +906,7 @@ void ajusterVitesse(int variation) {
   int nouvelle = (int)vitessePct + variation;
   nouvelle = constrain(nouvelle, 5, 100);
   vitessePct = (uint8_t)nouvelle;
+  marquerConfigSale();
   if (debugActif) {
     Serial.print(F("[MOTEUR] Vitesse demandee "));
     Serial.print(vitessePct);
@@ -918,7 +952,7 @@ void gererInterface() {
       if(d==Y_MOINS){modeUI=UI_ACCUEIL;ecranSale=true;}
       break;
     case UI_EDIT_TEMP:
-      if(d==X_PLUS){consigneTemp=min(consigneTemp+1,TEMP_CONSIGNE_MAX);ecranSale=true;}else if(d==X_MOINS){consigneTemp=max(consigneTemp-1,TEMP_CONSIGNE_MIN);ecranSale=true;}
+      if(d==X_PLUS){consigneTemp=min(consigneTemp+1,TEMP_CONSIGNE_MAX);marquerConfigSale();ecranSale=true;}else if(d==X_MOINS){consigneTemp=max(consigneTemp-1,TEMP_CONSIGNE_MIN);marquerConfigSale();ecranSale=true;}
       if(b==BTN_COURT||d==Y_MOINS){modeUI=UI_MENU;ecranSale=true;}
       break;
     default:break;
@@ -1108,6 +1142,7 @@ void dessinerGestionMoteur(){
 }
 
 void rafraichirEcran() {
+  if (ecranEnVeille) return;
   unsigned long maintenant = millis();
   if (!ecranSale && maintenant - derniereMajEcran < PERIODE_ECRAN_MS) return;
   derniereMajEcran = maintenant;
@@ -1119,7 +1154,34 @@ void rafraichirEcran() {
   else if (modeUI == UI_EDIT_TEMP) dessinerEditionTemp();
   else if (modeUI == UI_AUTOTUNE) dessinerAutotune();
   else dessinerGestionMoteur();
+  unsigned long debutEnvoi = micros();
   u8g2.sendBuffer();
+  unsigned long dureeEnvoi = micros() - debutEnvoi;
+  totalEcranUs += dureeEnvoi;
+  if (dureeEnvoi > dureeEcranMaxUs) dureeEcranMaxUs = dureeEnvoi;
+  if (++nbMesuresEcran >= 20) {
+    if (debugActif) {
+      Serial.print(F("[OLED] sendBuffer moyen=")); Serial.print(totalEcranUs / nbMesuresEcran);
+      Serial.print(F(" us max=")); Serial.print(dureeEcranMaxUs);
+      Serial.println(F(" us (20 trames)"));
+    }
+    totalEcranUs = 0; dureeEcranMaxUs = 0; nbMesuresEcran = 0;
+  }
+}
+
+void gererVeilleEcran() {
+  unsigned long maintenant = millis();
+  if (!ecranEnVeille && modeUI != UI_AUTOTUNE &&
+      maintenant - derniereActivite >= VEILLE_ECRAN_MS) {
+    modeUI = UI_ACCUEIL;
+    u8g2.setPowerSave(1);
+    ecranEnVeille = true;
+    activiteAvantVeille = derniereActivite;
+  } else if (ecranEnVeille && derniereActivite != activiteAvantVeille) {
+    u8g2.setPowerSave(0);
+    ecranEnVeille = false;
+    ecranSale = true;
+  }
 }
 
 void gererDebugSerie() {
@@ -1168,12 +1230,13 @@ void setup() {
   Serial.begin(115200);
 
   chargerPID();
+  chargerConfig();
+  digitalWrite(PIN_DIR, sensFwd ? DIR_FWD_LEVEL : DIR_REV_LEVEL);
   Wire.begin();
-  Wire.setClock(100000);
   u8g2.begin();
+  u8g2.setBusClock(400000);
   u8g2.setContrast(32);
 
-  sensFwd = true;
   filIn = false;
   derniereActivite = millis();
   ecranSale = true;
@@ -1200,6 +1263,8 @@ void loop() {
   gererChauffage();
   gererRampeMoteur();
   gererInterface();
+  sauverConfigSiNecessaire();
+  gererVeilleEcran();
   rafraichirEcran();
   imprimerDebug();
 }
