@@ -10,9 +10,9 @@ Firmware de banc de test hotend + moteur pour Arduino Mega 2560 / RAMPS 1.4.
 
 ## Documentation
 
-- [Documentation technique et câblage v1.0](Banc_Hotend_Mega2560_RAMPS14_SH1107_128x128_v2/README.md)
+- [Documentation technique et périmètre de validation bêta v1.1](Banc_Hotend_Mega2560_RAMPS14_SH1107_128x128_v2/README.md)
 - [Journal des versions et des tests](CHANGELOG.md)
-- [Firmware v1.0](Banc_Hotend_Mega2560_RAMPS14_SH1107_128x128_v2/Banc_Hotend_Mega2560_RAMPS14_SH1107_128x128_v2.ino)
+- [Firmware bêta v1.1](Banc_Hotend_Mega2560_RAMPS14_SH1107_128x128_v2/Banc_Hotend_Mega2560_RAMPS14_SH1107_128x128_v2.ino)
 
 ## Compilation et sécurité
 
