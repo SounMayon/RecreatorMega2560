@@ -62,3 +62,33 @@ Un test non réalisé doit être noté « non testé », jamais « validé ».
 | `75555af` | Documentation thermistance B3950 | README uniquement ; sketch inchangé par rapport au parent |
 | `9faaea1` à `24298ca` | Évolutions interface, joystick et sécurité filament | Non promues en stable ; à examiner / retester sur bêta |
 
+
+## Mise à jour bêta — intégration interface sans watchdog ni vitesse différée
+
+- Commit d'intégration initial : `830f73c`.
+- Ajustement des indications de l'écran vitesse : `ac13b47`.
+- Documentation du périmètre bêta : `4172fc6`.
+- Branche : `beta/1.1`.
+- Base fonctionnelle : `04ce9c9`.
+
+### Modifications retenues
+
+- Veille OLED avec température affichée et mise à jour périodique.
+- Navigation dédiée du menu moteur et sous-menus direction / vitesse.
+- Correction des axes X/Y dans les menus moteur et consigne.
+- Protection contre une commande directionnelle résiduelle à la sortie du menu moteur (attente du joystick au neutre).
+- Arrêt filament renforcé : demande de marche et inversion en attente annulées, sens demandé resynchronisé avec le sens courant.
+- Répétition joystick sur X et Y.
+- Documentation de navigation et de validation.
+
+### Modifications exclues à dessein
+
+- Watchdog AVR du commit `67d5805` : non intégré dans cette bêta afin de ne pas réintroduire le reset apparu lors du démarrage moteur.
+- Sélection différée de la vitesse du commit `d69dba3` : non intégrée. La vitesse reste modifiée directement, sans étape de validation différée.
+
+### Statut des tests
+
+- Compilation : en attente du résultat GitHub Actions sur le commit de cette bêta.
+- Tests matériels de cette intégration : **non réalisés à la date de cette entrée**.
+- Essais à réaliser : vérifier d'abord le non-redémarrage au lancement moteur, puis FWD/REV, marche/arrêt, sécurité filament, navigation des sous-menus, veille et réveil OLED.
+- Ne pas considérer la bêta comme certifiée tant que ces essais n'ont pas été consignés.
