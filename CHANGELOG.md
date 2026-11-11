@@ -24,9 +24,8 @@ Toutes les évolutions du firmware doivent être consignées ici. Les commits et
 
 - Branche : `beta/1.1`
 - Base : commit `04ce9c9`.
-- Statut : branche créée, code initial identique à v1.0.
-- But : reprendre les évolutions UI / veille OLED / menus moteur / gestion filament et traiter le redémarrage constaté dans le commit `67d5805`.
-- Aucun changement fonctionnel n'est encore intégré à cette bêta.
+- Statut : branche créée depuis `04ce9c9`, puis enrichie par l'intégration sélective documentée ci-dessous.
+- But : valider séparément les évolutions UI / veille OLED / menus moteur / gestion filament, sans watchdog et sans validation différée de vitesse.
 
 ## Régression connue
 
