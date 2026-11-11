@@ -176,7 +176,7 @@ bool filSurveillance = false;
 bool filIn = false;
 bool filInitialise = false;
 
-enum ModeUI : uint8_t { UI_ACCUEIL, UI_MENU, UI_EDIT_TEMP, UI_GESTION_MOTEUR, UI_AUTOTUNE };
+enum ModeUI : uint8_t { UI_ACCUEIL, UI_MENU, UI_EDIT_TEMP, UI_GESTION_MOTEUR, UI_MENU_MOTEUR_SENS, UI_MENU_MOTEUR_VITESSE, UI_AUTOTUNE };
 ModeUI modeUI = UI_ACCUEIL;
 ModeUI modeRetourMoteur = UI_ACCUEIL;
 
@@ -192,6 +192,9 @@ const char* const nomsMenu[NB_ITEMS] = {
   "Chauffe", "Temps C", "Moteur", "Capteur", "Autotune PID"
 };
 uint8_t selectionMenu = 0;
+uint8_t selectionMenuMoteur = 0;
+bool choixSensEditionFwd = true;
+int consigneTempEdition = 200;
 
 bool debugActif = DEBUG_AU_DEMARRAGE;
 bool ecranSale = true;
@@ -924,8 +927,8 @@ void activerChauffage() {
 void selectionnerMenu() {
   switch(selectionMenu) {
     case ITEM_CHAUFFE: activerChauffage(); break;
-    case ITEM_CONSIGNE: modeUI=UI_EDIT_TEMP; break;
-    case ITEM_MOTEUR: modeRetourMoteur=UI_MENU; modeUI=UI_GESTION_MOTEUR; break;
+    case ITEM_CONSIGNE: consigneTempEdition=consigneTemp; modeUI=UI_EDIT_TEMP; break;
+    case ITEM_MOTEUR: selectionMenuMoteur=0; modeUI=UI_GESTION_MOTEUR; break;
     case ITEM_FIL:
       filSurveillance=!filSurveillance;
       marquerConfigSale();
@@ -988,15 +991,38 @@ void gererInterface() {
       if(b==BTN_LONG){modeRetourMoteur=UI_ACCUEIL;modeUI=UI_GESTION_MOTEUR;ecranSale=true;}
       break;
     case UI_GESTION_MOTEUR:
-      // Priorite absolue a la sortie : aucun axe joystick ne doit changer le sens.
-      if (b == BTN_LONG) {
-        modeUI = modeRetourMoteur;
-        ignorerJoystickJusquaNeutre = true;
+      // Menu moteur : haut/bas naviguent, gauche revient, droite ou switch selectionne.
+      if (d == Y_PLUS) { selectionMenuMoteur = (selectionMenuMoteur + 2) % 3; ecranSale = true; }
+      else if (d == Y_MOINS) { selectionMenuMoteur = (selectionMenuMoteur + 1) % 3; ecranSale = true; }
+      else if (d == X_MOINS || b == BTN_LONG) { modeUI = UI_MENU; ignorerJoystickJusquaNeutre = true; ecranSale = true; }
+      else if (d == X_PLUS || b == BTN_COURT) {
+        if (selectionMenuMoteur == 0) {
+          if (moteurDemande) demanderArretMoteur();
+          else if (filAutoriseMoteur()) { moteurDemande = true; arretFilMemorise = false; }
+          else if (debugActif) Serial.println(F("[MOTEUR] Bloque : Fil=Out."));
+        } else if (selectionMenuMoteur == 1) {
+          choixSensEditionFwd = sensFwd;
+          modeUI = UI_MENU_MOTEUR_SENS;
+        } else {
+          modeUI = UI_MENU_MOTEUR_VITESSE;
+        }
         ecranSale = true;
-        return;
       }
-      if(d==X_PLUS)ajusterVitesse(PAS_VITESSE_PCT);else if(d==X_MOINS)ajusterVitesse(-PAS_VITESSE_PCT);else if(d==Y_PLUS)appliquerSens(true);else if(d==Y_MOINS)appliquerSens(false);
-      if(b==BTN_COURT){if(moteurDemande)demanderArretMoteur();else if(filAutoriseMoteur()){moteurDemande=true;arretFilMemorise=false;}else if(debugActif)Serial.println(F("[MOTEUR] Bloque : Fil=Out."));ecranSale=true;}
+      break;
+    case UI_MENU_MOTEUR_SENS:
+      if (d == Y_PLUS || d == Y_MOINS) { choixSensEditionFwd = !choixSensEditionFwd; ecranSale = true; }
+      else if (d == X_MOINS) { modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
+      else if (d == X_PLUS || b == BTN_COURT) {
+        appliquerSens(choixSensEditionFwd);
+        modeUI = UI_GESTION_MOTEUR;
+        ecranSale = true;
+      }
+      break;
+    case UI_MENU_MOTEUR_VITESSE:
+      if (d == Y_PLUS) { ajusterVitesse(PAS_VITESSE_PCT); }
+      else if (d == Y_MOINS) { ajusterVitesse(-PAS_VITESSE_PCT); }
+      else if (d == X_MOINS) { modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
+      else if (d == X_PLUS || b == BTN_COURT) { modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
       break;
     case UI_MENU:
       if(d==X_PLUS){selectionMenu=(selectionMenu+NB_ITEMS-1)%NB_ITEMS;ecranSale=true;}else if(d==X_MOINS){selectionMenu=(selectionMenu+1)%NB_ITEMS;ecranSale=true;}
@@ -1004,8 +1030,10 @@ void gererInterface() {
       if(d==Y_MOINS){modeUI=UI_ACCUEIL;ecranSale=true;}
       break;
     case UI_EDIT_TEMP:
-      if(d==X_PLUS){consigneTemp=min(consigneTemp+1,TEMP_CONSIGNE_MAX);marquerConfigSale();ecranSale=true;}else if(d==X_MOINS){consigneTemp=max(consigneTemp-1,TEMP_CONSIGNE_MIN);marquerConfigSale();ecranSale=true;}
-      if(b==BTN_COURT||d==Y_MOINS){modeUI=UI_MENU;ecranSale=true;}
+      if(d==Y_PLUS){consigneTempEdition=min(consigneTempEdition+1,TEMP_CONSIGNE_MAX);ecranSale=true;}
+      else if(d==Y_MOINS){consigneTempEdition=max(consigneTempEdition-1,TEMP_CONSIGNE_MIN);ecranSale=true;}
+      else if(d==X_PLUS||b==BTN_COURT){consigneTemp=consigneTempEdition;marquerConfigSale();modeUI=UI_MENU;ecranSale=true;}
+      else if(d==X_MOINS||b==BTN_LONG){consigneTempEdition=consigneTemp;modeUI=UI_MENU;ecranSale=true;}
       break;
     default:break;
   }
@@ -1124,18 +1152,19 @@ void dessinerEditionTemp() {
   u8g2.setFont(u8g2_font_9x15_tf);
   u8g2.drawUTF8(0, 38, "  Temp cible");
   
-  snprintf(val, sizeof(val), "%d C", consigneTemp);
+  snprintf(val, sizeof(val), "%d C", consigneTempEdition);
   u8g2.setFont(u8g2_font_helvB24_tf);
   int w = u8g2.getUTF8Width(val);
   u8g2.drawUTF8((128 - w) / 2, 75, val);
   
   u8g2.drawHLine(0, 95, 128);
   u8g2.setFont(u8g2_font_5x8_tf);
-  // X- diminue, X+ augmente ; bouton central valide ; Y- revient au menu.
-  dessinerFlecheBas(5,106); u8g2.drawUTF8(14,110,"Dim");
-  dessinerFlecheHaut(42,106); u8g2.drawUTF8(51,110,"Aug");
-  dessinerBoutonCentral(84,106); u8g2.drawUTF8(93,110,"Valider");
-  dessinerFlecheGauche(23,121); u8g2.drawUTF8(32,127,"Retour menu");
+  // Haut/bas modifient la valeur ; droite ou switch valide ; gauche annule.
+  dessinerFlecheBas(3,106); u8g2.drawUTF8(12,110,"-");
+  dessinerFlecheHaut(29,106); u8g2.drawUTF8(38,110,"+");
+  dessinerFlecheDroite(62,106); u8g2.drawUTF8(71,110,"Valider");
+  dessinerBoutonCentral(4,123); u8g2.drawUTF8(14,127,"OK");
+  dessinerFlecheGauche(53,123); u8g2.drawUTF8(63,127,"Annuler");
 }
 
 void dessinerAutotune() {
@@ -1180,6 +1209,54 @@ void dessinerFlecheBas(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y+5,x-3,y,x+3,y)
 void dessinerFlecheGauche(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y,x+5,y-3,x+5,y+3);u8g2.drawHLine(x,y,5);}
 void dessinerFlecheDroite(uint8_t x,uint8_t y){u8g2.drawTriangle(x+5,y,x,y-3,x,y+3);u8g2.drawHLine(x,y,5);}
 void dessinerBoutonCentral(uint8_t x,uint8_t y){u8g2.drawCircle(x,y,3);u8g2.drawDisc(x,y,1);}
+void dessinerMenuMoteur() {
+  u8g2.setFont(u8g2_font_9x15_tf);
+  u8g2.drawUTF8(0, 14, "  MENU MOTEUR");
+  u8g2.drawHLine(0, 19, 128);
+  const char* items[3] = {"Marche / Arret", "Direction", "Vitesse"};
+  u8g2.setFont(u8g2_font_7x14_tf);
+  for (uint8_t i=0; i<3; ++i) {
+    int y=42+i*23;
+    if (i==selectionMenuMoteur) { u8g2.drawBox(0,y-12,128,17); u8g2.setDrawColor(0); }
+    u8g2.drawUTF8(5,y,items[i]);
+    u8g2.setDrawColor(1);
+  }
+  u8g2.setFont(u8g2_font_5x8_tf);
+  dessinerFlecheHaut(3,111); dessinerFlecheBas(13,111); u8g2.drawUTF8(23,116,"Nav");
+  dessinerFlecheDroite(51,111); u8g2.drawUTF8(61,116,"Choisir");
+  dessinerFlecheGauche(3,123); u8g2.drawUTF8(13,127,"Retour");
+  dessinerBoutonCentral(74,123); u8g2.drawUTF8(84,127,"Select");
+}
+
+void dessinerMenuSens() {
+  u8g2.setFont(u8g2_font_9x15_tf);
+  u8g2.drawUTF8(0,14,"  CHOIX DIRECTION"); u8g2.drawHLine(0,19,128);
+  u8g2.setFont(u8g2_font_helvB18_tf);
+  const char* choix=choixSensEditionFwd ? "FWD" : "REV";
+  int w=u8g2.getUTF8Width(choix);
+  u8g2.drawUTF8((128-w)/2,68,choix);
+  u8g2.setFont(u8g2_font_5x8_tf);
+  dessinerFlecheHaut(4,105); dessinerFlecheBas(14,105); u8g2.drawUTF8(24,110,"Changer");
+  dessinerFlecheDroite(62,105); u8g2.drawUTF8(72,110,"Valider");
+  dessinerFlecheGauche(4,123); u8g2.drawUTF8(14,127,"Retour");
+  dessinerBoutonCentral(76,123); u8g2.drawUTF8(86,127,"OK");
+}
+
+void dessinerMenuVitesse() {
+  char val[16];
+  snprintf(val,sizeof(val),"%u %%",vitessePct);
+  u8g2.setFont(u8g2_font_9x15_tf);
+  u8g2.drawUTF8(0,14,"  REGLAGE VITESSE"); u8g2.drawHLine(0,19,128);
+  u8g2.setFont(u8g2_font_helvB24_tf);
+  int w=u8g2.getUTF8Width(val);
+  u8g2.drawUTF8((128-w)/2,72,val);
+  u8g2.setFont(u8g2_font_5x8_tf);
+  dessinerFlecheHaut(4,105); dessinerFlecheBas(14,105); u8g2.drawUTF8(24,110,"+ / - 5%");
+  dessinerFlecheDroite(62,105); u8g2.drawUTF8(72,110,"Valider");
+  dessinerFlecheGauche(4,123); u8g2.drawUTF8(14,127,"Retour");
+  dessinerBoutonCentral(76,123); u8g2.drawUTF8(86,127,"OK");
+}
+
 void dessinerGestionMoteur(){
   char val[20];u8g2.setFont(u8g2_font_7x14_tf);u8g2.drawUTF8(0,14,"   GESTION MOTEUR");u8g2.drawHLine(0,19,128);
   u8g2.drawUTF8(4,35,"Etat :");u8g2.drawUTF8(55,35,moteurDemande?"ON":"OFF");
@@ -1215,7 +1292,8 @@ void dessinerVeilleTemperature() {
 void rafraichirEcran() {
   unsigned long maintenant = millis();
   if (ecranEnVeille) {
-    if (maintenant - derniereMajVeille < PERIODE_DEPLACEMENT_VEILLE_MS && !ecranSale) return;
+    if (!ecranSale && maintenant - derniereMajEcran < PERIODE_ECRAN_MS) return;
+    derniereMajEcran = maintenant;
     if (maintenant - derniereMajVeille >= PERIODE_DEPLACEMENT_VEILLE_MS) {
       positionVeille = (positionVeille + 1) % 4;
     }
@@ -1235,6 +1313,9 @@ void rafraichirEcran() {
   else if (modeUI == UI_MENU) dessinerMenu();
   else if (modeUI == UI_EDIT_TEMP) dessinerEditionTemp();
   else if (modeUI == UI_AUTOTUNE) dessinerAutotune();
+  else if (modeUI == UI_GESTION_MOTEUR) dessinerMenuMoteur();
+  else if (modeUI == UI_MENU_MOTEUR_SENS) dessinerMenuSens();
+  else if (modeUI == UI_MENU_MOTEUR_VITESSE) dessinerMenuVitesse();
   else dessinerGestionMoteur();
   unsigned long debutEnvoi = micros();
   u8g2.sendBuffer();
