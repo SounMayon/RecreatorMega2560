@@ -1251,9 +1251,8 @@ void dessinerMenuVitesse() {
   int w=u8g2.getUTF8Width(val);
   u8g2.drawUTF8((128-w)/2,72,val);
   u8g2.setFont(u8g2_font_5x8_tf);
-  dessinerFlecheHaut(4,105); dessinerFlecheBas(14,105); u8g2.drawUTF8(24,110,"X +/- 5%");
-  dessinerFlecheDroite(62,105); u8g2.drawUTF8(72,110,"Retour");
-  dessinerFlecheGauche(4,123); u8g2.drawUTF8(14,127,"Retour");
+  dessinerFlecheGauche(4,105); dessinerFlecheDroite(14,105); u8g2.drawUTF8(24,110,"X +/- 5%");
+  dessinerFlecheBas(4,123); u8g2.drawUTF8(14,127,"Y- Retour");
   dessinerBoutonCentral(76,123); u8g2.drawUTF8(86,127,"OK");
 }
 
