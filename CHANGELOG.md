@@ -66,7 +66,9 @@ Un test non réalisé doit être noté « non testé », jamais « validé ».
 
 - Commit d'intégration initial : `830f73c`.
 - Ajustement des indications de l'écran vitesse : `ac13b47`.
-- Documentation du périmètre bêta : `4172fc6`.
+- Documentation du périmètre bêta : `4172fc6`, complétée par `a0078de`.
+- Correction du retour vers l'écran d'origine après sortie du menu moteur : `23ba9b4`.
+- Documentation de ce retour : `fc13a72`.
 - Branche : `beta/1.1`.
 - Base fonctionnelle : `04ce9c9`.
 
@@ -87,7 +89,7 @@ Un test non réalisé doit être noté « non testé », jamais « validé ».
 
 ### Statut des tests
 
-- Compilation : en attente du résultat GitHub Actions sur le commit de cette bêta.
+- Compilation : aucun statut CI n'est encore remonté pour le dernier commit au moment de cette mise à jour.
 - Tests matériels de cette intégration : **non réalisés à la date de cette entrée**.
 - Essais à réaliser : vérifier d'abord le non-redémarrage au lancement moteur, puis FWD/REV, marche/arrêt, sécurité filament, navigation des sous-menus, veille et réveil OLED.
 - Ne pas considérer la bêta comme certifiée tant que ces essais n'ont pas été consignés.
