@@ -993,10 +993,10 @@ void gererInterface() {
       break;
     case UI_GESTION_MOTEUR:
       // Menu moteur : haut/bas naviguent, gauche revient, droite ou switch selectionne.
-      if (d == Y_PLUS) { selectionMenuMoteur = (selectionMenuMoteur + 2) % 3; ecranSale = true; }
-      else if (d == Y_MOINS) { selectionMenuMoteur = (selectionMenuMoteur + 1) % 3; ecranSale = true; }
-      else if (d == X_MOINS || b == BTN_LONG) { modeUI = UI_MENU; ignorerJoystickJusquaNeutre = true; ecranSale = true; }
-      else if (d == X_PLUS || b == BTN_COURT) {
+      if (d == X_PLUS) { selectionMenuMoteur = (selectionMenuMoteur + 2) % 3; ecranSale = true; }
+      else if (d == X_MOINS) { selectionMenuMoteur = (selectionMenuMoteur + 1) % 3; ecranSale = true; }
+      else if (d == Y_MOINS || b == BTN_LONG) { modeUI = UI_MENU; ignorerJoystickJusquaNeutre = true; ecranSale = true; }
+      else if (d == Y_PLUS || b == BTN_COURT) {
         if (selectionMenuMoteur == 0) {
           if (moteurDemande) demanderArretMoteur();
           else if (filAutoriseMoteur()) { moteurDemande = true; arretFilMemorise = false; }
@@ -1012,19 +1012,19 @@ void gererInterface() {
       }
       break;
     case UI_MENU_MOTEUR_SENS:
-      if (d == Y_PLUS || d == Y_MOINS) { choixSensEditionFwd = !choixSensEditionFwd; ecranSale = true; }
-      else if (d == X_MOINS) { modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
-      else if (d == X_PLUS || b == BTN_COURT) {
+      if (d == X_PLUS || d == X_MOINS) { choixSensEditionFwd = !choixSensEditionFwd; ecranSale = true; }
+      else if (d == Y_MOINS) { modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
+      else if (d == Y_PLUS || b == BTN_COURT) {
         appliquerSens(choixSensEditionFwd);
         modeUI = UI_GESTION_MOTEUR;
         ecranSale = true;
       }
       break;
     case UI_MENU_MOTEUR_VITESSE:
-      if (d == Y_PLUS) { vitesseEditionPct = min((int)vitesseEditionPct + PAS_VITESSE_PCT, 100); ecranSale = true; }
-      else if (d == Y_MOINS) { vitesseEditionPct = max((int)vitesseEditionPct - PAS_VITESSE_PCT, 5); ecranSale = true; }
-      else if (d == X_MOINS || b == BTN_LONG) { modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
-      else if (d == X_PLUS || b == BTN_COURT) { vitessePct = vitesseEditionPct; marquerConfigSale(); modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
+      if (d == X_PLUS) { vitesseEditionPct = min((int)vitesseEditionPct + PAS_VITESSE_PCT, 100); ecranSale = true; }
+      else if (d == X_MOINS) { vitesseEditionPct = max((int)vitesseEditionPct - PAS_VITESSE_PCT, 5); ecranSale = true; }
+      else if (d == Y_MOINS || b == BTN_LONG) { modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
+      else if (d == Y_PLUS || b == BTN_COURT) { vitessePct = vitesseEditionPct; marquerConfigSale(); modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
       break;
     case UI_MENU:
       if(d==X_PLUS){selectionMenu=(selectionMenu+NB_ITEMS-1)%NB_ITEMS;ecranSale=true;}else if(d==X_MOINS){selectionMenu=(selectionMenu+1)%NB_ITEMS;ecranSale=true;}
@@ -1033,10 +1033,10 @@ void gererInterface() {
       if(d==Y_MOINS){modeUI=UI_ACCUEIL;ecranSale=true;}
       break;
     case UI_EDIT_TEMP:
-      if(d==Y_PLUS){consigneTempEdition=min(consigneTempEdition+1,TEMP_CONSIGNE_MAX);ecranSale=true;}
-      else if(d==Y_MOINS){consigneTempEdition=max(consigneTempEdition-1,TEMP_CONSIGNE_MIN);ecranSale=true;}
-      else if(d==X_PLUS||b==BTN_COURT){consigneTemp=consigneTempEdition;marquerConfigSale();modeUI=UI_MENU;ecranSale=true;}
-      else if(d==X_MOINS||b==BTN_LONG){consigneTempEdition=consigneTemp;modeUI=UI_MENU;ecranSale=true;}
+      if(d==X_PLUS){consigneTempEdition=min(consigneTempEdition+1,TEMP_CONSIGNE_MAX);ecranSale=true;}
+      else if(d==X_MOINS){consigneTempEdition=max(consigneTempEdition-1,TEMP_CONSIGNE_MIN);ecranSale=true;}
+      else if(d==Y_PLUS||b==BTN_COURT){consigneTemp=consigneTempEdition;marquerConfigSale();modeUI=UI_MENU;ecranSale=true;}
+      else if(d==Y_MOINS||b==BTN_LONG){consigneTempEdition=consigneTemp;modeUI=UI_MENU;ecranSale=true;}
       break;
     default:break;
   }
