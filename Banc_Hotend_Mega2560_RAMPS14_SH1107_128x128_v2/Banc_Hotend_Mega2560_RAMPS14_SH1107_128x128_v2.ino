@@ -175,7 +175,7 @@ bool filSurveillance = false;
 bool filIn = false;
 bool filInitialise = false;
 
-enum ModeUI : uint8_t { UI_ACCUEIL, UI_MENU, UI_EDIT_TEMP, UI_GESTION_MOTEUR, UI_AUTOTUNE };
+enum ModeUI : uint8_t { UI_ACCUEIL, UI_MENU, UI_EDIT_TEMP, UI_GESTION_MOTEUR, UI_MENU_MOTEUR_SENS, UI_MENU_MOTEUR_VITESSE, UI_AUTOTUNE };
 ModeUI modeUI = UI_ACCUEIL;
 ModeUI modeRetourMoteur = UI_ACCUEIL;
 
@@ -191,10 +191,17 @@ const char* const nomsMenu[NB_ITEMS] = {
   "Chauffe", "Temps C", "Moteur", "Capteur", "Autotune PID"
 };
 uint8_t selectionMenu = 0;
+uint8_t selectionMenuMoteur = 0;
+bool choixSensEditionFwd = true;
+int consigneTempEdition = 200;
 
 bool debugActif = DEBUG_AU_DEMARRAGE;
 bool ecranSale = true;
 bool ecranEnVeille = false;
+bool ignorerJoystickJusquaNeutre = false;
+uint8_t positionVeille = 0;
+unsigned long derniereMajVeille = 0;
+const unsigned long PERIODE_DEPLACEMENT_VEILLE_MS = 15000UL;
 unsigned long activiteAvantVeille = 0;
 unsigned long derniereMajEcran = 0;
 unsigned long derniereActivite = 0;
@@ -261,11 +268,8 @@ bool filAutoriseMoteur() {
 }
 void demarrerMoteurPhysiquement() {
   if (!filAutoriseMoteur()) {
-    moteurDemande = false;
-    changementSensEnAttente = false;
-    arretFilMemorise = true;
+    arreterMoteurSurSecuriteFil();
     if (debugActif) Serial.println(F("[FIL] Demarrage refuse : Fil=Out."));
-    ecranSale = true;
     return;
   }
 
@@ -291,6 +295,16 @@ void demarrerMoteurPhysiquement() {
 
 void demanderArretMoteur() {
   moteurDemande = false;
+  ecranSale = true;
+}
+
+// Arret prioritaire : aucune reprise ni inversion differee apres une securite filament.
+void arreterMoteurSurSecuriteFil() {
+  moteurDemande = false;
+  changementSensEnAttente = false;
+  sensDemandeFwd = sensFwd;
+  arretFilMemorise = true;
+  arreterMoteurPhysiquement();
   ecranSale = true;
 }
 
@@ -321,12 +335,8 @@ void gererRampeMoteur() {
   if (!moteurActif) return;
 
   if (!filAutoriseMoteur()) {
-    moteurDemande = false;
-    changementSensEnAttente = false;
-    arretFilMemorise = true;
-    arreterMoteurPhysiquement();
+    arreterMoteurSurSecuriteFil();
     if (debugActif) Serial.println(F("[FIL] Fil=Out : arret moteur."));
-    ecranSale = true;
     return;
   }
 
@@ -854,8 +864,7 @@ uint8_t lireDirectionEvenement() {
     prochaineRepetition = maintenant + 350;
     return actuelle;
   }
-  if ((actuelle == X_PLUS || actuelle == X_MOINS) &&
-      (long)(maintenant - prochaineRepetition) >= 0) {
+  if ((long)(maintenant - prochaineRepetition) >= 0) {
     prochaineRepetition = maintenant + 130;
     return actuelle;
   }
@@ -919,12 +928,14 @@ void activerChauffage() {
 void selectionnerMenu() {
   switch(selectionMenu) {
     case ITEM_CHAUFFE: activerChauffage(); break;
-    case ITEM_CONSIGNE: modeUI=UI_EDIT_TEMP; break;
-    case ITEM_MOTEUR: modeRetourMoteur=UI_MENU; modeUI=UI_GESTION_MOTEUR; break;
+    case ITEM_CONSIGNE: consigneTempEdition=consigneTemp; modeUI=UI_EDIT_TEMP; break;
+    case ITEM_MOTEUR: selectionMenuMoteur=0; modeUI=UI_GESTION_MOTEUR; break;
     case ITEM_FIL:
       filSurveillance=!filSurveillance;
       marquerConfigSale();
-      if(filSurveillance&&!filIn&&moteurActif){moteurDemande=false;changementSensEnAttente=false;arretFilMemorise=true;arreterMoteurPhysiquement();}
+      if(filSurveillance && !filIn && (moteurDemande || moteurActif || changementSensEnAttente)) {
+        arreterMoteurSurSecuriteFil();
+      }
       if(debugActif){Serial.print(F("[FIL] Surveillance "));Serial.println(filSurveillance?F("ON"):F("OFF"));}
       break;
     case ITEM_AUTOTUNE:
@@ -949,6 +960,10 @@ void ajusterVitesse(int variation) {
 
 void gererInterface() {
   uint8_t d=lireDirectionEvenement(), b=lireEvenementBouton();
+  if (ignorerJoystickJusquaNeutre) {
+    if (lireDirectionBrute() == DIR_NONE) ignorerJoystickJusquaNeutre = false;
+    else d = DIR_NONE;
+  }
   if(d!=DIR_NONE||b!=BTN_AUCUN) derniereActivite=millis();
   if(modeUI==UI_AUTOTUNE) {
     if(atEcran==AT_UI_PREPARATION) {
@@ -974,18 +989,51 @@ void gererInterface() {
       if(b==BTN_LONG){modeRetourMoteur=UI_ACCUEIL;modeUI=UI_GESTION_MOTEUR;ecranSale=true;}
       break;
     case UI_GESTION_MOTEUR:
-      if(d==X_PLUS)ajusterVitesse(PAS_VITESSE_PCT);else if(d==X_MOINS)ajusterVitesse(-PAS_VITESSE_PCT);else if(d==Y_PLUS)appliquerSens(true);else if(d==Y_MOINS)appliquerSens(false);
-      if(b==BTN_COURT){if(moteurDemande)demanderArretMoteur();else if(filAutoriseMoteur()){moteurDemande=true;arretFilMemorise=false;}else if(debugActif)Serial.println(F("[MOTEUR] Bloque : Fil=Out."));ecranSale=true;}
-      if(b==BTN_LONG){modeUI=modeRetourMoteur;ecranSale=true;}
+      // Menu moteur : haut/bas naviguent, gauche revient, droite ou switch selectionne.
+      if (d == X_PLUS) { selectionMenuMoteur = (selectionMenuMoteur + 2) % 3; ecranSale = true; }
+      else if (d == X_MOINS) { selectionMenuMoteur = (selectionMenuMoteur + 1) % 3; ecranSale = true; }
+      else if (d == Y_MOINS || b == BTN_LONG) { modeUI = UI_MENU; ignorerJoystickJusquaNeutre = true; ecranSale = true; }
+      else if (d == Y_PLUS || b == BTN_COURT) {
+        if (selectionMenuMoteur == 0) {
+          if (moteurDemande) demanderArretMoteur();
+          else if (filAutoriseMoteur()) { moteurDemande = true; arretFilMemorise = false; }
+          else if (debugActif) Serial.println(F("[MOTEUR] Bloque : Fil=Out."));
+        } else if (selectionMenuMoteur == 1) {
+          choixSensEditionFwd = sensFwd;
+          modeUI = UI_MENU_MOTEUR_SENS;
+        } else {
+          modeUI = UI_MENU_MOTEUR_VITESSE;
+        }
+        ecranSale = true;
+      }
+      break;
+    case UI_MENU_MOTEUR_SENS:
+      if (d == X_PLUS || d == X_MOINS) { choixSensEditionFwd = !choixSensEditionFwd; ecranSale = true; }
+      else if (d == Y_MOINS) { modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
+      else if (d == Y_PLUS || b == BTN_COURT) {
+        appliquerSens(choixSensEditionFwd);
+        modeUI = UI_GESTION_MOTEUR;
+        ecranSale = true;
+      }
+      break;
+    case UI_MENU_MOTEUR_VITESSE:
+      // Réglage direct : X modifie la vitesse ; Y- ou appui long revient.
+      if (d == X_PLUS) { ajusterVitesse(PAS_VITESSE_PCT); }
+      else if (d == X_MOINS) { ajusterVitesse(-PAS_VITESSE_PCT); }
+      else if (d == Y_MOINS || b == BTN_LONG) { modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
+      else if (d == Y_PLUS || b == BTN_COURT) { modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
       break;
     case UI_MENU:
       if(d==X_PLUS){selectionMenu=(selectionMenu+NB_ITEMS-1)%NB_ITEMS;ecranSale=true;}else if(d==X_MOINS){selectionMenu=(selectionMenu+1)%NB_ITEMS;ecranSale=true;}
-      if(d==Y_PLUS||b==BTN_COURT)selectionnerMenu();
+      if (selectionMenu == ITEM_MOTEUR && b == BTN_LONG) { selectionMenuMoteur=0; modeUI=UI_GESTION_MOTEUR; ecranSale=true; }
+      else if(d==Y_PLUS||b==BTN_COURT)selectionnerMenu();
       if(d==Y_MOINS){modeUI=UI_ACCUEIL;ecranSale=true;}
       break;
     case UI_EDIT_TEMP:
-      if(d==X_PLUS){consigneTemp=min(consigneTemp+1,TEMP_CONSIGNE_MAX);marquerConfigSale();ecranSale=true;}else if(d==X_MOINS){consigneTemp=max(consigneTemp-1,TEMP_CONSIGNE_MIN);marquerConfigSale();ecranSale=true;}
-      if(b==BTN_COURT||d==Y_MOINS){modeUI=UI_MENU;ecranSale=true;}
+      if(d==X_PLUS){consigneTempEdition=min(consigneTempEdition+1,TEMP_CONSIGNE_MAX);ecranSale=true;}
+      else if(d==X_MOINS){consigneTempEdition=max(consigneTempEdition-1,TEMP_CONSIGNE_MIN);ecranSale=true;}
+      else if(d==Y_PLUS||b==BTN_COURT){consigneTemp=consigneTempEdition;marquerConfigSale();modeUI=UI_MENU;ecranSale=true;}
+      else if(d==Y_MOINS||b==BTN_LONG){consigneTempEdition=consigneTemp;modeUI=UI_MENU;ecranSale=true;}
       break;
     default:break;
   }
@@ -1104,18 +1152,19 @@ void dessinerEditionTemp() {
   u8g2.setFont(u8g2_font_9x15_tf);
   u8g2.drawUTF8(0, 38, "  Temp cible");
   
-  snprintf(val, sizeof(val), "%d C", consigneTemp);
+  snprintf(val, sizeof(val), "%d C", consigneTempEdition);
   u8g2.setFont(u8g2_font_helvB24_tf);
   int w = u8g2.getUTF8Width(val);
   u8g2.drawUTF8((128 - w) / 2, 75, val);
   
   u8g2.drawHLine(0, 95, 128);
   u8g2.setFont(u8g2_font_5x8_tf);
-  // X- diminue, X+ augmente ; bouton central valide ; Y- revient au menu.
-  dessinerFlecheBas(5,106); u8g2.drawUTF8(14,110,"Dim");
-  dessinerFlecheHaut(42,106); u8g2.drawUTF8(51,110,"Aug");
-  dessinerBoutonCentral(84,106); u8g2.drawUTF8(93,110,"Valider");
-  dessinerFlecheGauche(23,121); u8g2.drawUTF8(32,127,"Retour menu");
+  // Haut/bas modifient la valeur ; droite ou switch valide ; gauche annule.
+  dessinerFlecheBas(3,106); u8g2.drawUTF8(12,110,"-");
+  dessinerFlecheHaut(29,106); u8g2.drawUTF8(38,110,"+");
+  dessinerFlecheDroite(62,106); u8g2.drawUTF8(71,110,"Valider");
+  dessinerBoutonCentral(4,123); u8g2.drawUTF8(14,127,"OK");
+  dessinerFlecheGauche(53,123); u8g2.drawUTF8(63,127,"Annuler");
 }
 
 void dessinerAutotune() {
@@ -1160,6 +1209,54 @@ void dessinerFlecheBas(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y+5,x-3,y,x+3,y)
 void dessinerFlecheGauche(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y,x+5,y-3,x+5,y+3);u8g2.drawHLine(x,y,5);}
 void dessinerFlecheDroite(uint8_t x,uint8_t y){u8g2.drawTriangle(x+5,y,x,y-3,x,y+3);u8g2.drawHLine(x,y,5);}
 void dessinerBoutonCentral(uint8_t x,uint8_t y){u8g2.drawCircle(x,y,3);u8g2.drawDisc(x,y,1);}
+void dessinerMenuMoteur() {
+  u8g2.setFont(u8g2_font_9x15_tf);
+  u8g2.drawUTF8(0, 14, "  MENU MOTEUR");
+  u8g2.drawHLine(0, 19, 128);
+  const char* items[3] = {"Marche / Arret", "Direction", "Vitesse"};
+  u8g2.setFont(u8g2_font_7x14_tf);
+  for (uint8_t i=0; i<3; ++i) {
+    int y=42+i*23;
+    if (i==selectionMenuMoteur) { u8g2.drawBox(0,y-12,128,17); u8g2.setDrawColor(0); }
+    u8g2.drawUTF8(5,y,items[i]);
+    u8g2.setDrawColor(1);
+  }
+  u8g2.setFont(u8g2_font_5x8_tf);
+  dessinerFlecheHaut(3,111); dessinerFlecheBas(13,111); u8g2.drawUTF8(23,116,"Nav");
+  dessinerFlecheDroite(51,111); u8g2.drawUTF8(61,116,"Choisir");
+  dessinerFlecheGauche(3,123); u8g2.drawUTF8(13,127,"Retour");
+  dessinerBoutonCentral(74,123); u8g2.drawUTF8(84,127,"Select");
+}
+
+void dessinerMenuSens() {
+  u8g2.setFont(u8g2_font_9x15_tf);
+  u8g2.drawUTF8(0,14,"  CHOIX DIRECTION"); u8g2.drawHLine(0,19,128);
+  u8g2.setFont(u8g2_font_helvB18_tf);
+  const char* choix=choixSensEditionFwd ? "FWD" : "REV";
+  int w=u8g2.getUTF8Width(choix);
+  u8g2.drawUTF8((128-w)/2,68,choix);
+  u8g2.setFont(u8g2_font_5x8_tf);
+  dessinerFlecheHaut(4,105); dessinerFlecheBas(14,105); u8g2.drawUTF8(24,110,"Changer");
+  dessinerFlecheDroite(62,105); u8g2.drawUTF8(72,110,"Valider");
+  dessinerFlecheGauche(4,123); u8g2.drawUTF8(14,127,"Retour");
+  dessinerBoutonCentral(76,123); u8g2.drawUTF8(86,127,"OK");
+}
+
+void dessinerMenuVitesse() {
+  char val[16];
+  snprintf(val,sizeof(val),"%u %%",vitessePct);
+  u8g2.setFont(u8g2_font_9x15_tf);
+  u8g2.drawUTF8(0,14,"  REGLAGE VITESSE"); u8g2.drawHLine(0,19,128);
+  u8g2.setFont(u8g2_font_helvB24_tf);
+  int w=u8g2.getUTF8Width(val);
+  u8g2.drawUTF8((128-w)/2,72,val);
+  u8g2.setFont(u8g2_font_5x8_tf);
+  dessinerFlecheHaut(4,105); dessinerFlecheBas(14,105); u8g2.drawUTF8(24,110,"X +/- 5%");
+  dessinerFlecheDroite(62,105); u8g2.drawUTF8(72,110,"Retour");
+  dessinerFlecheGauche(4,123); u8g2.drawUTF8(14,127,"Retour");
+  dessinerBoutonCentral(76,123); u8g2.drawUTF8(86,127,"OK");
+}
+
 void dessinerGestionMoteur(){
   char val[20];u8g2.setFont(u8g2_font_7x14_tf);u8g2.drawUTF8(0,14,"   GESTION MOTEUR");u8g2.drawHLine(0,19,128);
   u8g2.drawUTF8(4,35,"Etat :");u8g2.drawUTF8(55,35,moteurDemande?"ON":"OFF");
@@ -1173,9 +1270,40 @@ void dessinerGestionMoteur(){
   dessinerBoutonCentral(49,124);u8g2.drawUTF8(55,127,"Marche/Arret");
 }
 
+void dessinerVeilleTemperature() {
+  char ligne[16];
+  if (sondeValide && temperatureInitialisee) {
+    char t[12];
+    dtostrf(temperatureC, 1, 1, t);
+    snprintf(ligne, sizeof(ligne), "%sC", t);
+  } else {
+    snprintf(ligne, sizeof(ligne), "--.-C");
+  }
+
+  // Le texte se deplace periodiquement pour limiter le marquage OLED.
+  static const int8_t decalagesX[4] = {-8, 8, 5, -5};
+  static const uint8_t lignesY[4] = {34, 62, 94, 122};
+  u8g2.setFont(u8g2_font_helvB24_tf);
+  int x = (128 - u8g2.getUTF8Width(ligne)) / 2 + decalagesX[positionVeille];
+  x = constrain(x, 0, 127 - u8g2.getUTF8Width(ligne));
+  u8g2.drawUTF8(x, lignesY[positionVeille], ligne);
+}
+
 void rafraichirEcran() {
-  if (ecranEnVeille) return;
   unsigned long maintenant = millis();
+  if (ecranEnVeille) {
+    if (!ecranSale && maintenant - derniereMajEcran < PERIODE_ECRAN_MS) return;
+    derniereMajEcran = maintenant;
+    if (maintenant - derniereMajVeille >= PERIODE_DEPLACEMENT_VEILLE_MS) {
+      positionVeille = (positionVeille + 1) % 4;
+    }
+    derniereMajVeille = maintenant;
+    ecranSale = false;
+    u8g2.clearBuffer();
+    dessinerVeilleTemperature();
+    u8g2.sendBuffer();
+    return;
+  }
   if (!ecranSale && maintenant - derniereMajEcran < PERIODE_ECRAN_MS) return;
   derniereMajEcran = maintenant;
   ecranSale = false;
@@ -1185,6 +1313,9 @@ void rafraichirEcran() {
   else if (modeUI == UI_MENU) dessinerMenu();
   else if (modeUI == UI_EDIT_TEMP) dessinerEditionTemp();
   else if (modeUI == UI_AUTOTUNE) dessinerAutotune();
+  else if (modeUI == UI_GESTION_MOTEUR) dessinerMenuMoteur();
+  else if (modeUI == UI_MENU_MOTEUR_SENS) dessinerMenuSens();
+  else if (modeUI == UI_MENU_MOTEUR_VITESSE) dessinerMenuVitesse();
   else dessinerGestionMoteur();
   unsigned long debutEnvoi = micros();
   u8g2.sendBuffer();
@@ -1206,11 +1337,12 @@ void gererVeilleEcran() {
   if (!ecranEnVeille && modeUI != UI_AUTOTUNE &&
       maintenant - derniereActivite >= VEILLE_ECRAN_MS) {
     modeUI = UI_ACCUEIL;
-    u8g2.setPowerSave(1);
     ecranEnVeille = true;
+    positionVeille = 0;
+    derniereMajVeille = 0;
+    ecranSale = true;
     activiteAvantVeille = derniereActivite;
   } else if (ecranEnVeille && derniereActivite != activiteAvantVeille) {
-    u8g2.setPowerSave(0);
     ecranEnVeille = false;
     ecranSale = true;
   }
@@ -1284,12 +1416,9 @@ void loop() {
   lireFil();
 
   if (filSurveillance && FIL_ARRET_MOTEUR_SI_OUT && !filIn &&
-      (moteurDemande || moteurActif)) {
-    moteurDemande = false;
-    arretFilMemorise = true;
-    arreterMoteurPhysiquement();
-    if (debugActif) Serial.println(F("[FIL] Out : moteur coupe."));
-    ecranSale = true;
+      (moteurDemande || moteurActif || changementSensEnAttente)) {
+    arreterMoteurSurSecuriteFil();
+    if (debugActif) Serial.println(F("[FIL] Out : moteur coupe, inversion en attente annulee."));
   }
 
   gererChauffage();
