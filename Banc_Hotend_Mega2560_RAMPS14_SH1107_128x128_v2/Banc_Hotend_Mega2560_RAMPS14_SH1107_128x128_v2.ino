@@ -194,6 +194,7 @@ const char* const nomsMenu[NB_ITEMS] = {
 uint8_t selectionMenu = 0;
 uint8_t selectionMenuMoteur = 0;
 bool choixSensEditionFwd = true;
+uint8_t vitesseEditionPct = VITESSE_DEPART_PCT;
 int consigneTempEdition = 200;
 
 bool debugActif = DEBUG_AU_DEMARRAGE;
@@ -1004,6 +1005,7 @@ void gererInterface() {
           choixSensEditionFwd = sensFwd;
           modeUI = UI_MENU_MOTEUR_SENS;
         } else {
+          vitesseEditionPct = vitessePct;
           modeUI = UI_MENU_MOTEUR_VITESSE;
         }
         ecranSale = true;
@@ -1019,14 +1021,15 @@ void gererInterface() {
       }
       break;
     case UI_MENU_MOTEUR_VITESSE:
-      if (d == Y_PLUS) { ajusterVitesse(PAS_VITESSE_PCT); }
-      else if (d == Y_MOINS) { ajusterVitesse(-PAS_VITESSE_PCT); }
-      else if (d == X_MOINS) { modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
-      else if (d == X_PLUS || b == BTN_COURT) { modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
+      if (d == Y_PLUS) { vitesseEditionPct = min((int)vitesseEditionPct + PAS_VITESSE_PCT, 100); ecranSale = true; }
+      else if (d == Y_MOINS) { vitesseEditionPct = max((int)vitesseEditionPct - PAS_VITESSE_PCT, 5); ecranSale = true; }
+      else if (d == X_MOINS || b == BTN_LONG) { modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
+      else if (d == X_PLUS || b == BTN_COURT) { vitessePct = vitesseEditionPct; marquerConfigSale(); modeUI = UI_GESTION_MOTEUR; ecranSale = true; }
       break;
     case UI_MENU:
       if(d==X_PLUS){selectionMenu=(selectionMenu+NB_ITEMS-1)%NB_ITEMS;ecranSale=true;}else if(d==X_MOINS){selectionMenu=(selectionMenu+1)%NB_ITEMS;ecranSale=true;}
-      if(d==Y_PLUS||b==BTN_COURT)selectionnerMenu();
+      if (selectionMenu == ITEM_MOTEUR && b == BTN_LONG) { selectionMenuMoteur=0; modeUI=UI_GESTION_MOTEUR; ecranSale=true; }
+      else if(d==Y_PLUS||b==BTN_COURT)selectionnerMenu();
       if(d==Y_MOINS){modeUI=UI_ACCUEIL;ecranSale=true;}
       break;
     case UI_EDIT_TEMP:
@@ -1244,7 +1247,7 @@ void dessinerMenuSens() {
 
 void dessinerMenuVitesse() {
   char val[16];
-  snprintf(val,sizeof(val),"%u %%",vitessePct);
+  snprintf(val,sizeof(val),"%u %%",vitesseEditionPct);
   u8g2.setFont(u8g2_font_9x15_tf);
   u8g2.drawUTF8(0,14,"  REGLAGE VITESSE"); u8g2.drawHLine(0,19,128);
   u8g2.setFont(u8g2_font_helvB24_tf);
