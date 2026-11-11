@@ -1210,15 +1210,30 @@ void dessinerFlecheGauche(uint8_t x,uint8_t y){u8g2.drawTriangle(x,y,x+5,y-3,x+5
 void dessinerFlecheDroite(uint8_t x,uint8_t y){u8g2.drawTriangle(x+5,y,x,y-3,x,y+3);u8g2.drawHLine(x,y,5);}
 void dessinerBoutonCentral(uint8_t x,uint8_t y){u8g2.drawCircle(x,y,3);u8g2.drawDisc(x,y,1);}
 void dessinerMenuMoteur() {
+  char valeur[12];
+  const char* items[3] = {"Moteur", "Sens", "Vitesse"};
+  const char* etatMoteur = (filSurveillance && !filIn) ? "OUT" :
+                           (moteurDemande || moteurActif) ? "ON" : "OFF";
+  const char* valeurs[3] = {
+    etatMoteur,
+    sensFwd ? "FWD" : "REV",
+    valeur
+  };
+  snprintf(valeur, sizeof(valeur), "%u%%", vitessePct);
+
   u8g2.setFont(u8g2_font_9x15_tf);
   u8g2.drawUTF8(0, 14, "  MENU MOTEUR");
   u8g2.drawHLine(0, 19, 128);
-  const char* items[3] = {"Marche / Arret", "Direction", "Vitesse"};
   u8g2.setFont(u8g2_font_7x14_tf);
   for (uint8_t i=0; i<3; ++i) {
     int y=42+i*23;
-    if (i==selectionMenuMoteur) { u8g2.drawBox(0,y-12,128,17); u8g2.setDrawColor(0); }
+    if (i==selectionMenuMoteur) {
+      u8g2.drawBox(0,y-12,128,17);
+      u8g2.setDrawColor(0);
+    }
     u8g2.drawUTF8(5,y,items[i]);
+    int largeur = u8g2.getUTF8Width(valeurs[i]);
+    u8g2.drawUTF8(122-largeur,y,valeurs[i]);
     u8g2.setDrawColor(1);
   }
   u8g2.setFont(u8g2_font_5x8_tf);
