@@ -165,6 +165,7 @@ float temperaturePrecedente = 0.0f;
 
 bool moteurDemande = false;
 bool moteurActif = false;
+uint8_t causeResetInitiale = 0;
 bool sensFwd = true;
 uint8_t vitessePct = VITESSE_DEPART_PCT;
 float rpmActuel = 0.0f;
@@ -270,11 +271,8 @@ bool filAutoriseMoteur() {
 }
 void demarrerMoteurPhysiquement() {
   if (!filAutoriseMoteur()) {
-    moteurDemande = false;
-    changementSensEnAttente = false;
-    arretFilMemorise = true;
+    arreterMoteurSurSecuriteFil();
     if (debugActif) Serial.println(F("[FIL] Demarrage refuse : Fil=Out."));
-    ecranSale = true;
     return;
   }
 
@@ -300,6 +298,16 @@ void demarrerMoteurPhysiquement() {
 
 void demanderArretMoteur() {
   moteurDemande = false;
+  ecranSale = true;
+}
+
+// Arret prioritaire : aucune reprise ni inversion differee apres une securite filament.
+void arreterMoteurSurSecuriteFil() {
+  moteurDemande = false;
+  changementSensEnAttente = false;
+  sensDemandeFwd = sensFwd;
+  arretFilMemorise = true;
+  arreterMoteurPhysiquement();
   ecranSale = true;
 }
 
@@ -330,12 +338,8 @@ void gererRampeMoteur() {
   if (!moteurActif) return;
 
   if (!filAutoriseMoteur()) {
-    moteurDemande = false;
-    changementSensEnAttente = false;
-    arretFilMemorise = true;
-    arreterMoteurPhysiquement();
+    arreterMoteurSurSecuriteFil();
     if (debugActif) Serial.println(F("[FIL] Fil=Out : arret moteur."));
-    ecranSale = true;
     return;
   }
 
@@ -863,8 +867,7 @@ uint8_t lireDirectionEvenement() {
     prochaineRepetition = maintenant + 350;
     return actuelle;
   }
-  if ((actuelle == X_PLUS || actuelle == X_MOINS) &&
-      (long)(maintenant - prochaineRepetition) >= 0) {
+  if ((long)(maintenant - prochaineRepetition) >= 0) {
     prochaineRepetition = maintenant + 130;
     return actuelle;
   }
@@ -934,10 +937,7 @@ void selectionnerMenu() {
       filSurveillance=!filSurveillance;
       marquerConfigSale();
       if(filSurveillance && !filIn && (moteurDemande || moteurActif || changementSensEnAttente)) {
-        moteurDemande = false;
-        changementSensEnAttente = false;
-        arretFilMemorise = true;
-        arreterMoteurPhysiquement();
+        arreterMoteurSurSecuriteFil();
       }
       if(debugActif){Serial.print(F("[FIL] Surveillance "));Serial.println(filSurveillance?F("ON"):F("OFF"));}
       break;
@@ -1382,8 +1382,9 @@ void imprimerDebug(){
 }
 
 void setup() {
-  // Desactiver un eventuel watchdog laisse actif apres un reset precedent.
-  MCUSR &= ~_BV(WDRF);
+  // Memoriser la cause du reset avant de desactiver le watchdog.
+  causeResetInitiale = MCUSR;
+  MCUSR = 0;
   wdt_disable();
 
   pinMode(PIN_HEATER, OUTPUT);
@@ -1415,6 +1416,11 @@ void setup() {
   if (debugActif) {
     Serial.println();
     Serial.println(F("=== BANC HOTEND / MOTEUR - SH1107 128x128 ==="));
+    Serial.print(F("[RESET] MCUSR=0x")); Serial.println(causeResetInitiale, HEX);
+    if (causeResetInitiale & _BV(WDRF)) Serial.println(F("[RESET] Cause: watchdog (WDRF)."));
+    if (causeResetInitiale & _BV(BORF)) Serial.println(F("[RESET] Cause: brown-out alimentation (BORF)."));
+    if (causeResetInitiale & _BV(EXTRF)) Serial.println(F("[RESET] Cause: reset externe (EXTRF)."));
+    if (causeResetInitiale & _BV(PORF)) Serial.println(F("[RESET] Cause: mise sous tension (PORF)."));
     Serial.println(F("[SECURITE] Watchdog AVR actif (2 s)."));
   }
   // Active apres l'initialisation des sorties et des peripheriques.
@@ -1427,12 +1433,8 @@ void loop() {
 
   if (filSurveillance && FIL_ARRET_MOTEUR_SI_OUT && !filIn &&
       (moteurDemande || moteurActif || changementSensEnAttente)) {
-    moteurDemande = false;
-    changementSensEnAttente = false;
-    arretFilMemorise = true;
-    arreterMoteurPhysiquement();
+    arreterMoteurSurSecuriteFil();
     if (debugActif) Serial.println(F("[FIL] Out : moteur coupe, inversion en attente annulee."));
-    ecranSale = true;
   }
 
   gererChauffage();
