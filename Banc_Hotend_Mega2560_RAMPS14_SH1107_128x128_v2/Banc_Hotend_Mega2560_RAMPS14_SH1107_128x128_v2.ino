@@ -1342,7 +1342,7 @@ void loop() {
   lireFil();
 
   if (filSurveillance && FIL_ARRET_MOTEUR_SI_OUT && !filIn &&
-      (moteurDemande || moteurActif)) {
+      (moteurDemande || moteurActif || changementSensEnAttente)) {
     moteurDemande = false;
     changementSensEnAttente = false;
     arretFilMemorise = true;
