@@ -39,6 +39,16 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <EEPROM.h>
+#include <avr/wdt.h>
+
+// Capture la cause du reset avant l'initialisation Arduino et des variables globales.
+uint8_t mcusrAuDemarrage __attribute__((section(".noinit")));
+void capturerCauseReset() __attribute__((naked, section(".init3")));
+void capturerCauseReset() {
+  mcusrAuDemarrage = MCUSR;
+  MCUSR = 0;
+  wdt_disable();
+}
 
 // ---------------- OLED : Grove V2.1 SH1107G, 128x128 ----------------
 U8G2_SH1107_SEEED_128X128_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
@@ -1422,7 +1432,17 @@ void setup() {
   if (debugActif) {
     Serial.println();
     Serial.println(F("=== BANC HOTEND / MOTEUR - SH1107 128x128 ==="));
+    Serial.print(F("[RESET] MCUSR=0x"));
+    Serial.println(mcusrAuDemarrage, HEX);
+    if (mcusrAuDemarrage & _BV(WDRF)) Serial.println(F("[RESET] Cause: WATCHDOG (WDRF)"));
+    if (mcusrAuDemarrage & _BV(BORF)) Serial.println(F("[RESET] Cause: BROWN-OUT (BORF)"));
+    if (mcusrAuDemarrage & _BV(EXTRF)) Serial.println(F("[RESET] Cause: EXTERNAL (EXTRF)"));
+    if (mcusrAuDemarrage & _BV(PORF)) Serial.println(F("[RESET] Cause: POWER-ON (PORF)"));
+    if (mcusrAuDemarrage == 0) Serial.println(F("[RESET] Aucun indicateur MCUSR conserve."));
+    Serial.println(F("[WATCHDOG] Activation: 2 s"));
   }
+  // Active apres l'initialisation des sorties et des peripheriques.
+  wdt_enable(WDTO_2S);
 }
 
 void loop() {
@@ -1442,4 +1462,5 @@ void loop() {
   gererVeilleEcran();
   rafraichirEcran();
   imprimerDebug();
+  wdt_reset();
 }
