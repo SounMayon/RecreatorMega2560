@@ -1,6 +1,6 @@
 # Banc Hotend + moteur — bêta v1.1
 
-> **Version bêta de validation d'interface.** Cette branche est issue de la base stable v1.0 (\`04ce9c9\`). Elle intègre les évolutions d'interface, de veille OLED, de navigation joystick et de sécurité filament sélectionnées après cette base. Elle est destinée aux essais et n'est pas déclarée stable.
+> **Version bêta de validation d'interface.** Cette branche est issue de la base stable v1.0 (`04ce9c9`). Elle intègre les évolutions d'interface, de veille OLED, de navigation joystick et de sécurité filament sélectionnées après cette base. Elle est destinée aux essais et n'est pas déclarée stable.
 
 ## Périmètre de cette bêta
 
@@ -14,8 +14,8 @@
 - documentation du câblage, des réglages, de la navigation et des essais.
 
 **Exclus volontairement :**
-- **Watchdog AVR** introduit dans \`67d5805\` : exclu pour isoler le redémarrage constaté au démarrage moteur.
-- **Sélection différée de la vitesse** introduite dans \`d69dba3\` : exclue. La vitesse reste modifiée immédiatement.
+- **Watchdog AVR** introduit dans `67d5805` : exclu pour isoler le redémarrage constaté au démarrage moteur.
+- **Sélection différée de la vitesse** introduite dans `d69dba3` : exclue. La vitesse reste modifiée immédiatement.
 
 ## Plan de validation de la bêta
 
@@ -30,6 +30,7 @@ Noter le SHA exact testé et le résultat de chaque point. Une compilation réus
 
 ---
 
+# Banc Hotend + moteur — Arduino Mega 2560 / RAMPS 1.4
 
 Firmware de banc de test pour piloter un hotend, un moteur pas-à-pas et un écran OLED Grove SH1107 128×128.
 
@@ -83,58 +84,50 @@ Sélectionner **Arduino Mega 2560** comme carte. La compilation continue est dé
 
 La réussite de la compilation ne constitue pas un essai matériel : chauffage, thermistance, I2C, moteur, switch et protections doivent être validés sur le montage réel.
 
-## 4. Navigation
+## 4. Navigation — bêta v1.1
 
-Les directions sont celles du joystick. L’appui long correspond à environ **1,5 seconde**.
+Les directions correspondent aux axes physiques du joystick : **X = horizontal**, **Y = vertical**. L'appui long correspond à environ **1,5 seconde**.
 
 ### Accueil
-
 - **Y+** : ouvrir le menu général.
-- **Appui long** : ouvrir directement la gestion moteur.
-
-L’accueil affiche la consigne et l’état du chauffage, la température mesurée, la vitesse/direction et l’état du switch filament et de sa surveillance.
+- **Appui long** : ouvrir directement le menu de gestion moteur.
 
 ### Menu général
-
 - **X+ / X−** : déplacer la sélection.
 - **Y+** ou **appui court** : sélectionner.
-- **Y−** : retour à l’accueil.
+- **Y−** : revenir à l'accueil.
+- Lorsque l'élément **Moteur** est sélectionné, **appui long** ouvre directement le menu moteur.
 
-Éléments disponibles : Chauffe, consigne, Moteur, Capteur (surveillance filament), Autotune PID.
+### Menu moteur
+- **X+ / X−** : naviguer entre Marche/Arrêt, Direction et Vitesse.
+- **Y+** ou **appui court** : entrer dans l'élément sélectionné.
+- **Y−** ou **appui long** : revenir au menu général.
+- Après la sortie, les directions du joystick sont ignorées jusqu'à son retour au neutre afin d'éviter une commande directionnelle résiduelle.
 
-### Gestion moteur
+### Marche / Arrêt
+- Sélectionner **Marche / Arrêt** avec Y+ ou le bouton.
+- **Y+** ou **appui court** : basculer la demande marche/arrêt.
+- Le verrouillage filament reste prioritaire.
 
+### Choix de direction
+- **X+ / X−** : basculer entre FWD et REV.
+- **Y+** ou **appui court** : appliquer le choix.
+- **Y−** : revenir sans appliquer.
+
+### Réglage de vitesse — immédiat dans cette bêta
 - **X+ / X−** : augmenter / diminuer la vitesse par pas de 5 %.
-- **Y+** : demander FWD.
-- **Y−** : demander REV.
-- **Appui court** : marche / arrêt.
-- **Appui long** : quitter vers l’écran d’origine (accueil ou menu).
-
-Une inversion demandée pendant que le moteur tourne est effectuée après une rampe de ralentissement et un arrêt. À la sortie par appui long, les commandes directionnelles sont ignorées jusqu’au retour du joystick au neutre : cela évite une activation involontaire de REV.
-
-Si la surveillance filament est active et que Fil Out est détecté, le moteur est coupé sans attendre la rampe et les demandes de changement de sens en attente sont effacées.
+- **Y−** ou **appui long** : revenir au menu moteur.
+- **Y+** ou **appui court** : quitter l'écran de vitesse.
+- La modification est immédiate ; il n'y a volontairement pas de sélection différée ni de validation séparée dans cette version.
 
 ### Réglage de consigne
-
 - **X+** : augmenter la consigne.
 - **X−** : diminuer la consigne.
-- **Appui court** : valider.
-- **Y−** : revenir au menu.
-
-Plage logicielle : **50 à 280 °C**.
+- **Y+** ou **appui court** : valider.
+- **Y−** ou **appui long** : annuler et revenir au menu.
 
 ### Autotune PID
-
-L’autotune utilise la consigne courante. Avant lancement, les coefficients PID EEPROM sont présentés lorsqu’ils sont valides et l’utilisateur confirme le lancement. Après calcul, une confirmation distincte permet de sauvegarder ou non les nouveaux coefficients. Une sauvegarde est relue et vérifiée ; en cas de refus ou d’échec, les anciens coefficients restent actifs en RAM.
-
-Conditions et limites codées :
-- Hystérésis de régulation autotune : ±2 °C.
-- PWM fixe de test : 180/255.
-- Test préliminaire : au moins 2 °C de montée en 60 secondes.
-- Plafond : minimum entre cible +20 °C et limite de sécurité −10 °C.
-- Temporisation maximale autotune : 12 minutes, 5 cycles attendus.
-
-L’autotune nécessite une surveillance du montage et ne doit pas être lancé sans protections thermiques matérielles indépendantes.
+L'autotune conserve les étapes de préparation, lancement, annulation et confirmation de sauvegarde PID. Il doit être réalisé sous surveillance et avec une protection thermique matérielle indépendante.
 
 ## 5. Réglages principaux du firmware
 
@@ -172,9 +165,7 @@ Les structures contiennent un identifiant, une version et un CRC. La configurati
 - Après 60 secondes d’inactivité, l’écran affiche uniquement la température ; sa position change toutes les 15 secondes pour limiter le marquage OLED.
 - Une action sur le joystick réveille l’interface.
 
-## 8. Watchdog et diagnostic série
-
-Le watchdog AVR est activé avec un délai de **2 secondes** après l’initialisation matérielle. Il est réarmé à chaque tour normal de la boucle principale ; si le programme se bloque, le microcontrôleur redémarre.
+## 8. Diagnostic série
 
 Le port série fonctionne à **115200 bauds** :
 - `D` : activer les messages de debug.
@@ -193,3 +184,21 @@ Avant toute utilisation prolongée, vérifier notamment :
 5. le comportement après veille, réveil et redémarrage watchdog.
 
 Le firmware seul ne peut garantir la sécurité d’un montage chauffant. Les essais doivent être réalisés progressivement et sous surveillance.
+
+## Thermistance T0 : table nominale 100 kOhm B3950
+
+La conversion utilise une table ADC/température avec interpolation linéaire, calculée pour une thermistance nominale 100 kOhm à 25 °C, Beta 3950 K, et la résistance pull-up RAMPS de 4,7 kOhm. Les points couvrent 0 à 300 °C par pas de 10 °C. La table est stockée en mémoire programme (PROGMEM).
+
+| Température | ADC approximatif |
+|---:|---:|
+| 20 °C | 986 |
+| 50 °C | 905 |
+| 100 °C | 611 |
+| 150 °C | 305 |
+| 200 °C | 140 |
+| 220 °C | 104 |
+| 250 °C | 68 |
+| 280 °C | 46 |
+| 290 °C | 41 |
+
+Ces valeurs sont un modèle théorique générique, pas une calibration de la sonde montée sur le hotend. La tolérance de la thermistance, du Beta réel, de la pull-up et de la référence ADC peut entraîner un écart. La table n'améliore pas magiquement la résolution ADC : autour de 250 °C, un pas ADC reste de plusieurs degrés. Avant d'utiliser le banc à haute température, comparer la mesure à une sonde de référence correctement positionnée, vérifier la température ambiante à froid et contrôler la résistance réelle de la pull-up. Ne pas relever TEMP_SECURITE_MAX pour compenser un écart. Toute protection thermique matérielle indépendante doit rester en place.
