@@ -39,6 +39,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <EEPROM.h>
+#include <avr/wdt.h>
 
 // ---------------- OLED : Grove V2.1 SH1107G, 128x128 ----------------
 U8G2_SH1107_SEEED_128X128_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
@@ -195,6 +196,10 @@ uint8_t selectionMenu = 0;
 bool debugActif = DEBUG_AU_DEMARRAGE;
 bool ecranSale = true;
 bool ecranEnVeille = false;
+bool ignorerJoystickJusquaNeutre = false;
+uint8_t positionVeille = 0;
+unsigned long derniereMajVeille = 0;
+const unsigned long PERIODE_DEPLACEMENT_VEILLE_MS = 15000UL;
 unsigned long activiteAvantVeille = 0;
 unsigned long derniereMajEcran = 0;
 unsigned long derniereActivite = 0;
@@ -924,7 +929,12 @@ void selectionnerMenu() {
     case ITEM_FIL:
       filSurveillance=!filSurveillance;
       marquerConfigSale();
-      if(filSurveillance&&!filIn&&moteurActif){moteurDemande=false;changementSensEnAttente=false;arretFilMemorise=true;arreterMoteurPhysiquement();}
+      if(filSurveillance && !filIn && (moteurDemande || moteurActif || changementSensEnAttente)) {
+        moteurDemande = false;
+        changementSensEnAttente = false;
+        arretFilMemorise = true;
+        arreterMoteurPhysiquement();
+      }
       if(debugActif){Serial.print(F("[FIL] Surveillance "));Serial.println(filSurveillance?F("ON"):F("OFF"));}
       break;
     case ITEM_AUTOTUNE:
@@ -949,6 +959,10 @@ void ajusterVitesse(int variation) {
 
 void gererInterface() {
   uint8_t d=lireDirectionEvenement(), b=lireEvenementBouton();
+  if (ignorerJoystickJusquaNeutre) {
+    if (lireDirectionBrute() == DIR_NONE) ignorerJoystickJusquaNeutre = false;
+    else d = DIR_NONE;
+  }
   if(d!=DIR_NONE||b!=BTN_AUCUN) derniereActivite=millis();
   if(modeUI==UI_AUTOTUNE) {
     if(atEcran==AT_UI_PREPARATION) {
@@ -974,9 +988,15 @@ void gererInterface() {
       if(b==BTN_LONG){modeRetourMoteur=UI_ACCUEIL;modeUI=UI_GESTION_MOTEUR;ecranSale=true;}
       break;
     case UI_GESTION_MOTEUR:
+      // Priorite absolue a la sortie : aucun axe joystick ne doit changer le sens.
+      if (b == BTN_LONG) {
+        modeUI = modeRetourMoteur;
+        ignorerJoystickJusquaNeutre = true;
+        ecranSale = true;
+        return;
+      }
       if(d==X_PLUS)ajusterVitesse(PAS_VITESSE_PCT);else if(d==X_MOINS)ajusterVitesse(-PAS_VITESSE_PCT);else if(d==Y_PLUS)appliquerSens(true);else if(d==Y_MOINS)appliquerSens(false);
       if(b==BTN_COURT){if(moteurDemande)demanderArretMoteur();else if(filAutoriseMoteur()){moteurDemande=true;arretFilMemorise=false;}else if(debugActif)Serial.println(F("[MOTEUR] Bloque : Fil=Out."));ecranSale=true;}
-      if(b==BTN_LONG){modeUI=modeRetourMoteur;ecranSale=true;}
       break;
     case UI_MENU:
       if(d==X_PLUS){selectionMenu=(selectionMenu+NB_ITEMS-1)%NB_ITEMS;ecranSale=true;}else if(d==X_MOINS){selectionMenu=(selectionMenu+1)%NB_ITEMS;ecranSale=true;}
@@ -1173,9 +1193,39 @@ void dessinerGestionMoteur(){
   dessinerBoutonCentral(49,124);u8g2.drawUTF8(55,127,"Marche/Arret");
 }
 
+void dessinerVeilleTemperature() {
+  char ligne[16];
+  if (sondeValide && temperatureInitialisee) {
+    char t[12];
+    dtostrf(temperatureC, 1, 1, t);
+    snprintf(ligne, sizeof(ligne), "%sC", t);
+  } else {
+    snprintf(ligne, sizeof(ligne), "--.-C");
+  }
+
+  // Le texte se deplace periodiquement pour limiter le marquage OLED.
+  static const int8_t decalagesX[4] = {-8, 8, 5, -5};
+  static const uint8_t lignesY[4] = {34, 62, 94, 122};
+  u8g2.setFont(u8g2_font_helvB24_tf);
+  int x = (128 - u8g2.getUTF8Width(ligne)) / 2 + decalagesX[positionVeille];
+  x = constrain(x, 0, 127 - u8g2.getUTF8Width(ligne));
+  u8g2.drawUTF8(x, lignesY[positionVeille], ligne);
+}
+
 void rafraichirEcran() {
-  if (ecranEnVeille) return;
   unsigned long maintenant = millis();
+  if (ecranEnVeille) {
+    if (maintenant - derniereMajVeille < PERIODE_DEPLACEMENT_VEILLE_MS && !ecranSale) return;
+    if (maintenant - derniereMajVeille >= PERIODE_DEPLACEMENT_VEILLE_MS) {
+      positionVeille = (positionVeille + 1) % 4;
+    }
+    derniereMajVeille = maintenant;
+    ecranSale = false;
+    u8g2.clearBuffer();
+    dessinerVeilleTemperature();
+    u8g2.sendBuffer();
+    return;
+  }
   if (!ecranSale && maintenant - derniereMajEcran < PERIODE_ECRAN_MS) return;
   derniereMajEcran = maintenant;
   ecranSale = false;
@@ -1206,11 +1256,12 @@ void gererVeilleEcran() {
   if (!ecranEnVeille && modeUI != UI_AUTOTUNE &&
       maintenant - derniereActivite >= VEILLE_ECRAN_MS) {
     modeUI = UI_ACCUEIL;
-    u8g2.setPowerSave(1);
     ecranEnVeille = true;
+    positionVeille = 0;
+    derniereMajVeille = 0;
+    ecranSale = true;
     activiteAvantVeille = derniereActivite;
   } else if (ecranEnVeille && derniereActivite != activiteAvantVeille) {
-    u8g2.setPowerSave(0);
     ecranEnVeille = false;
     ecranSale = true;
   }
@@ -1247,6 +1298,10 @@ void imprimerDebug(){
 }
 
 void setup() {
+  // Desactiver un eventuel watchdog laisse actif apres un reset precedent.
+  MCUSR &= ~_BV(WDRF);
+  wdt_disable();
+
   pinMode(PIN_HEATER, OUTPUT);
   digitalWrite(PIN_HEATER, LOW);
 
@@ -1276,7 +1331,10 @@ void setup() {
   if (debugActif) {
     Serial.println();
     Serial.println(F("=== BANC HOTEND / MOTEUR - SH1107 128x128 ==="));
+    Serial.println(F("[SECURITE] Watchdog AVR actif (2 s)."));
   }
+  // Active apres l'initialisation des sorties et des peripheriques.
+  wdt_enable(WDTO_2S);
 }
 
 void loop() {
@@ -1286,9 +1344,10 @@ void loop() {
   if (filSurveillance && FIL_ARRET_MOTEUR_SI_OUT && !filIn &&
       (moteurDemande || moteurActif)) {
     moteurDemande = false;
+    changementSensEnAttente = false;
     arretFilMemorise = true;
     arreterMoteurPhysiquement();
-    if (debugActif) Serial.println(F("[FIL] Out : moteur coupe."));
+    if (debugActif) Serial.println(F("[FIL] Out : moteur coupe, inversion en attente annulee."));
     ecranSale = true;
   }
 
@@ -1299,4 +1358,5 @@ void loop() {
   gererVeilleEcran();
   rafraichirEcran();
   imprimerDebug();
+  wdt_reset();
 }
