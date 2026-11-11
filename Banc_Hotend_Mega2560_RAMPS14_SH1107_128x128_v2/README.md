@@ -101,7 +101,7 @@ Les directions correspondent aux axes physiques du joystick : **X = horizontal**
 ### Menu moteur
 - **X+ / X−** : naviguer entre Marche/Arrêt, Direction et Vitesse.
 - **Y+** ou **appui court** : entrer dans l'élément sélectionné.
-- **Y−** ou **appui long** : revenir au menu général.
+- **Y−** ou **appui long** : revenir à l'écran d'origine (accueil ou menu général).
 - Après la sortie, les directions du joystick sont ignorées jusqu'à son retour au neutre afin d'éviter une commande directionnelle résiduelle.
 
 ### Marche / Arrêt
