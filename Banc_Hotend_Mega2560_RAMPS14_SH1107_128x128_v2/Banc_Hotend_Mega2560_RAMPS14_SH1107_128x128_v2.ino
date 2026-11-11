@@ -929,7 +929,7 @@ void selectionnerMenu() {
   switch(selectionMenu) {
     case ITEM_CHAUFFE: activerChauffage(); break;
     case ITEM_CONSIGNE: consigneTempEdition=consigneTemp; modeUI=UI_EDIT_TEMP; break;
-    case ITEM_MOTEUR: selectionMenuMoteur=0; modeUI=UI_GESTION_MOTEUR; break;
+    case ITEM_MOTEUR: modeRetourMoteur=UI_MENU; selectionMenuMoteur=0; modeUI=UI_GESTION_MOTEUR; break;
     case ITEM_FIL:
       filSurveillance=!filSurveillance;
       marquerConfigSale();
@@ -992,7 +992,7 @@ void gererInterface() {
       // Menu moteur : haut/bas naviguent, gauche revient, droite ou switch selectionne.
       if (d == X_PLUS) { selectionMenuMoteur = (selectionMenuMoteur + 2) % 3; ecranSale = true; }
       else if (d == X_MOINS) { selectionMenuMoteur = (selectionMenuMoteur + 1) % 3; ecranSale = true; }
-      else if (d == Y_MOINS || b == BTN_LONG) { modeUI = UI_MENU; ignorerJoystickJusquaNeutre = true; ecranSale = true; }
+      else if (d == Y_MOINS || b == BTN_LONG) { modeUI = modeRetourMoteur; ignorerJoystickJusquaNeutre = true; ecranSale = true; }
       else if (d == Y_PLUS || b == BTN_COURT) {
         if (selectionMenuMoteur == 0) {
           if (moteurDemande) demanderArretMoteur();
@@ -1025,7 +1025,7 @@ void gererInterface() {
       break;
     case UI_MENU:
       if(d==X_PLUS){selectionMenu=(selectionMenu+NB_ITEMS-1)%NB_ITEMS;ecranSale=true;}else if(d==X_MOINS){selectionMenu=(selectionMenu+1)%NB_ITEMS;ecranSale=true;}
-      if (selectionMenu == ITEM_MOTEUR && b == BTN_LONG) { selectionMenuMoteur=0; modeUI=UI_GESTION_MOTEUR; ecranSale=true; }
+      if (selectionMenu == ITEM_MOTEUR && b == BTN_LONG) { modeRetourMoteur=UI_MENU; selectionMenuMoteur=0; modeUI=UI_GESTION_MOTEUR; ecranSale=true; }
       else if(d==Y_PLUS||b==BTN_COURT)selectionnerMenu();
       if(d==Y_MOINS){modeUI=UI_ACCUEIL;ecranSale=true;}
       break;
