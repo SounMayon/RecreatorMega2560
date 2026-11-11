@@ -1213,7 +1213,7 @@ void dessinerMenuMoteur() {
   char valeur[12];
   const char* items[3] = {"Moteur", "Sens", "Vitesse"};
   const char* etatMoteur = (filSurveillance && !filIn) ? "OUT" :
-                           (moteurDemande || moteurActif) ? "ON" : "OFF";
+                           moteurActif ? "ON" : "OFF";
   const char* valeurs[3] = {
     etatMoteur,
     sensFwd ? "FWD" : "REV",
